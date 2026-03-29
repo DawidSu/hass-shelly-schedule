@@ -501,7 +501,7 @@ class ShellyScheduleCard extends HTMLElement {
         // transient activation token, which would block window.open afterwards
         window.open(`http://${hostname}`, "_blank");
         const password = this._hass?.states[entityId]?.attributes?.login_password;
-        if (password) navigator.clipboard.writeText(password).catch(() => {});
+        if (password && navigator.clipboard) navigator.clipboard.writeText(password).catch(() => {});
         return;
       }
 
