@@ -1,4 +1,4 @@
-"""Shelly Schedule Manager – native HA custom integration (v2.0).
+"""Shelly Schedule – native HA custom integration (v0.2.0).
 
 Config-flow based setup: Settings → Integrations → Add Integration → Shelly Schedule.
 Supports Gen2/Gen3 (Digest-Auth) and Gen1 (Basic-Auth) Shelly devices.
