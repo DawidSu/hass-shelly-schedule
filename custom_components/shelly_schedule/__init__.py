@@ -15,7 +15,7 @@ from functools import partial
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_START, EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import CoreState
+from homeassistant.core import CoreState, callback
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.event import async_track_time_interval
@@ -710,7 +710,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.async_create_task(_startup(delay=2))
     else:
         # HA cold start — wait for Shelly to finish loading
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, lambda e: hass.async_create_task(_startup(delay=20)))
+        @callback
+        def _on_started(event):
+            hass.async_create_task(_startup(delay=20))
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
     # Periodic update every SCAN_INTERVAL_SECONDS
     async def _periodic_update(now):
