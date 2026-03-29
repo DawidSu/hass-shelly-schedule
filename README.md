@@ -1,4 +1,4 @@
-# Shelly Aufgaben-Manager
+# Shelly Schedule
 
 Home Assistant Custom Integration zum Konfigurieren von Aufgaben (Zeitplänen) direkt auf Shelly-Geräten — ohne die Shelly-App, direkt aus der HA-Oberfläche.
 
