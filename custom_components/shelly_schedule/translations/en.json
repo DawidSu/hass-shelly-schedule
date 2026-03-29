@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Shelly Schedule",
+        "description": "Credentials are automatically taken from the Shelly integration. Per-device overrides can be set after setup via Options."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Select Device",
+        "description": "Select a device to override its credentials.",
+        "data": { "device": "Device" }
+      },
+      "device_password": {
+        "title": "Credentials for {device_name}",
+        "data": {
+          "gen2_password": "Password",
+          "gen1_username": "Username",
+          "gen1_password": "Password"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "No Shelly devices found. Set up the Shelly integration first."
+    }
+  }
+}

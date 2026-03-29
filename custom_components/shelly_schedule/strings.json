@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shelly Schedule einrichten",
+        "description": "Zugangsdaten werden automatisch aus der Shelly-Integration übernommen. Individuelle Überschreibungen sind nach der Einrichtung unter Optionen möglich."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Gerät auswählen",
+        "description": "Wähle ein Gerät für individuelle Zugangsdaten.",
+        "data": { "device": "Gerät" }
+      },
+      "device_password": {
+        "title": "Zugangsdaten für {device_name}",
+        "data": {
+          "gen2_password": "Passwort",
+          "gen1_username": "Benutzername",
+          "gen1_password": "Passwort"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Keine Shelly-Geräte gefunden. Shelly-Integration zuerst einrichten."
+    }
+  }
+}

@@ -1,0 +1,57 @@
+reload_devices:
+  name: Geräte laden
+  description: Lädt alle Shelly-Geräte aus der HA Device Registry neu und aktualisiert die Geräteauswahl.
+
+update_sensors:
+  name: Schedule aktualisieren
+  description: Aktualisiert alle Shelly Zeitplan-Sensoren (Gen2/Gen3 und Gen1) per HTTP-Abfrage.
+
+create_schedule:
+  name: Zeitplan erstellen
+  description: >
+    Erstellt einen neuen Zeitplan auf dem aktuell ausgewählten Gen2/Gen3-Gerät.
+    Verwendet die Werte aus den Entitäten Uhrzeit, Wochentage, Aktion und Position.
+
+delete_schedule:
+  name: Zeitplan löschen
+  description: >
+    Löscht einen Zeitplan per ID vom aktuell ausgewählten Gen2/Gen3-Gerät.
+    Die ID wird aus der Entität "Shelly Schedule Zeitplan ID" gelesen.
+
+enable_schedule:
+  name: Zeitplan aktivieren
+  description: >
+    Aktiviert einen Zeitplan per ID auf dem aktuell ausgewählten Gen2/Gen3-Gerät.
+    Die ID wird aus der Entität "Shelly Schedule Zeitplan ID" gelesen.
+
+disable_schedule:
+  name: Zeitplan deaktivieren
+  description: >
+    Deaktiviert einen Zeitplan per ID auf dem aktuell ausgewählten Gen2/Gen3-Gerät.
+    Die ID wird aus der Entität "Shelly Schedule Zeitplan ID" gelesen.
+
+replace_schedule:
+  name: Zeitplan ersetzen
+  description: >
+    Ersetzt einen bestehenden Zeitplan: löscht zuerst den Zeitplan mit der angegebenen ID
+    und erstellt dann einen neuen Zeitplan mit den aktuell eingestellten Werten
+    (Uhrzeit, Wochentage, Aktion, Position).
+
+gen1_set_schedule:
+  name: Gen1 Zeitplan setzen
+  description: >
+    Setzt einen Zeitplan auf dem aktuell ausgewählten Gen1-Gerät.
+    Ersetzt alle vorhandenen Regeln durch eine neue Regel mit Uhrzeit und Aktion
+    (Einschalten/Ausschalten) aus den entsprechenden Entitäten.
+
+gen1_delete_schedule:
+  name: Gen1 Zeitplan löschen
+  description: Löscht alle Zeitplanregeln vom aktuell ausgewählten Gen1-Gerät und deaktiviert die Zeitplanung.
+
+gen1_enable_scheduling:
+  name: Gen1 Zeitplanung aktivieren
+  description: Aktiviert die Zeitplanung auf dem aktuell ausgewählten Gen1-Gerät (schedule=true).
+
+gen1_disable_scheduling:
+  name: Gen1 Zeitplanung deaktivieren
+  description: Deaktiviert die Zeitplanung auf dem aktuell ausgewählten Gen1-Gerät (schedule=false).
