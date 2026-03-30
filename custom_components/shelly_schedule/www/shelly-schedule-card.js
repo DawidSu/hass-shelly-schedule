@@ -452,9 +452,7 @@ class ShellyScheduleCard extends HTMLElement {
             <input type="checkbox" class="btn-toggle" ${enabled ? "checked" : ""} data-id="${job.id}" data-entity="${dev.entityId}" data-enabled="${enabled}">
             <span class="sw-slider"></span>
           </label>
-          <button class="btn-icon btn-test" title="Jetzt ausführen" data-calls='${JSON.stringify(job.calls || []).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}">
-            <ha-icon icon="mdi:play-circle-outline"></ha-icon>
-          </button>
+          ${this._config?.hide_run_button ? "" : `<button class="btn-icon btn-test" title="Jetzt ausführen" data-calls='${JSON.stringify(job.calls || []).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}"><ha-icon icon="mdi:play-circle-outline"></ha-icon></button>`}
           <button class="btn-icon btn-edit" title="Bearbeiten" data-job='${JSON.stringify(job).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}">
             <ha-icon icon="mdi:pencil"></ha-icon>
           </button>
@@ -1013,6 +1011,10 @@ class ShellyScheduleCardEditor extends HTMLElement {
               <label for="ed-hide-action" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Aktion anzeigen</label>
               <ha-switch id="ed-hide-action"></ha-switch>
             </div>
+            <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;">
+              <label for="ed-hide-run-button" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Ausführen-Button anzeigen</label>
+              <ha-switch id="ed-hide-run-button"></ha-switch>
+            </div>
             <div class="ed-color-row">
               <span>Akzentfarbe</span>
               <input id="ed-color" type="color" title="Farbe wählen">
@@ -1091,6 +1093,14 @@ class ShellyScheduleCardEditor extends HTMLElement {
     hideActionEl.checked = this._config.hide_action !== true;
     hideActionEl.addEventListener("change", e => {
       this._config = { ...this._config, hide_action: !e.target.checked };
+      this._fire(this._config);
+    });
+
+    // hide run button (default: shown = switch ON)
+    const hideRunBtnEl = this.querySelector("#ed-hide-run-button");
+    hideRunBtnEl.checked = this._config.hide_run_button !== true;
+    hideRunBtnEl.addEventListener("change", e => {
+      this._config = { ...this._config, hide_run_button: !e.target.checked };
       this._fire(this._config);
     });
 
