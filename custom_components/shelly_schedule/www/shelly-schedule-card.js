@@ -4,10 +4,216 @@
  * Registers with window.customCards so it appears in the HA card picker.
  */
 
+// ── Translation loader ────────────────────────────────────────────────────────
+
+/**
+ * Translation files are served from /shelly_schedule/translations/<lang>.json.
+ * The card loads them on first use and caches by language code.
+ * Falls back to the bundled TRANSLATIONS object if the fetch fails.
+ */
+const _translationCache = {};
+
+async function _loadTranslationFile(lang) {
+  if (_translationCache[lang]) return _translationCache[lang];
+  try {
+    const resp = await fetch(`/shelly_schedule/translations/${lang}.json`);
+    if (!resp.ok) throw new Error(resp.status);
+    _translationCache[lang] = await resp.json();
+  } catch {
+    // Fallback: use bundled translations (set below)
+    _translationCache[lang] = TRANSLATIONS[lang] || TRANSLATIONS.de;
+  }
+  return _translationCache[lang];
+}
+
+// ── Bundled fallback translations ─────────────────────────────────────────────
+
+const TRANSLATIONS = {
+  de: {
+    default_title:       "Shelly Schedules",
+    section_entity:      "Entität",
+    pick_entity:         "– Entität wählen –",
+    no_entity:           "Bitte eine Entität unter <b>Bearbeiten</b> auswählen.",
+    entity_not_found:    "Entität {0} nicht gefunden.",
+    section_gen1:        "Gen1 Geräte",
+    section_gen2:        "Gen2/Gen3 Geräte",
+    webui_btn:           "Web-UI",
+    webui_title:         "Web-UI öffnen",
+    unavailable:         "Nicht erreichbar",
+    task_singular:       "Aufgabe",
+    task_plural:         "Aufgaben",
+    btn_new:             "+ Neu",
+    no_schedules:        "Keine Zeitpläne",
+    sunrise:             "☀️ Sonnenaufgang",
+    sunset:              "🌙 Sonnenuntergang",
+    tooltip_disable:     "Deaktivieren",
+    tooltip_enable:      "Aktivieren",
+    tooltip_run:         "Jetzt ausführen",
+    tooltip_edit:        "Bearbeiten",
+    tooltip_delete:      "Löschen",
+    // Actions (internal German keys map to these display labels)
+    action_on:           "Einschalten",
+    action_off:          "Ausschalten",
+    action_open:         "Öffnen",
+    action_close:        "Schließen",
+    action_stop:         "Stoppen",
+    action_position:     "Position",
+    // Day options
+    day_daily:           "Täglich",
+    day_workdays:        "Werktags (Mo-Fr)",
+    day_weekend:         "Wochenende (Sa-So)",
+    day_mon:             "Montag",   day_tue: "Dienstag",  day_wed: "Mittwoch",
+    day_thu:             "Donnerstag", day_fri: "Freitag", day_sat: "Samstag", day_sun: "Sonntag",
+    day_short_mon:       "Mo", day_short_tue: "Di", day_short_wed: "Mi",
+    day_short_thu:       "Do", day_short_fri: "Fr", day_short_sat: "Sa", day_short_sun: "So",
+    // Modal
+    modal_edit:          "Aufgabe bearbeiten",
+    modal_new:           "Neue Aufgabe",
+    modal_time_type:     "Zeittyp",
+    modal_timetype_time: "Uhrzeit",
+    modal_timetype_sun:  "☀️ Sonnenaufgang",
+    modal_timetype_set:  "🌙 Sonnenuntergang",
+    modal_time:          "Uhrzeit",
+    modal_offset:        "Versatz (Minuten, negativ = davor)",
+    modal_days:          "Wochentage",
+    modal_action:        "Aktion",
+    modal_position:      "Position (%)",
+    modal_enabled:       "Aktiviert",
+    modal_cancel:        "Abbrechen",
+    modal_save:          "Speichern",
+    modal_create:        "Erstellen",
+    confirm_delete:      "Aufgabe #{0} wirklich löschen?",
+    // Editor
+    ed_section_title:    "Titel",
+    ed_section_content:  "Inhalt",
+    ed_card_title:       "Kartentitel",
+    ed_hide_title:       "Titel ausblenden",
+    ed_accent_color:     "Akzentfarbe",
+    ed_color_reset:      "zurücksetzen",
+    ed_device_icon:      "Icon neben Gerätename",
+    ed_badge_mode:       "Listenbadge",
+    ed_badge_id:         "ID",
+    ed_badge_icon:       "Aktionssymbol",
+    ed_badge_none:       "Nichts",
+    ed_day_display:      "Tagesanzeige",
+    ed_day_text:         "Text",
+    ed_day_chips:        "Chips",
+    ed_show_webui:       "Web-UI Link anzeigen",
+    ed_show_action:      "Aktion anzeigen",
+    ed_show_run_btn:     "Ausführen-Button anzeigen",
+    color_pick_title:    "Farbe wählen",
+  },
+  en: {
+    default_title:       "Shelly Schedules",
+    section_entity:      "Entity",
+    pick_entity:         "– Select entity –",
+    no_entity:           "Please select an entity under <b>Edit</b>.",
+    entity_not_found:    "Entity {0} not found.",
+    section_gen1:        "Gen1 Devices",
+    section_gen2:        "Gen2/Gen3 Devices",
+    webui_btn:           "Web-UI",
+    webui_title:         "Open Web-UI",
+    unavailable:         "Unreachable",
+    task_singular:       "schedule",
+    task_plural:         "schedules",
+    btn_new:             "+ New",
+    no_schedules:        "No schedules",
+    sunrise:             "☀️ Sunrise",
+    sunset:              "🌙 Sunset",
+    tooltip_disable:     "Disable",
+    tooltip_enable:      "Enable",
+    tooltip_run:         "Run now",
+    tooltip_edit:        "Edit",
+    tooltip_delete:      "Delete",
+    action_on:           "Turn on",
+    action_off:          "Turn off",
+    action_open:         "Open",
+    action_close:        "Close",
+    action_stop:         "Stop",
+    action_position:     "Position",
+    day_daily:           "Daily",
+    day_workdays:        "Weekdays (Mo-Fr)",
+    day_weekend:         "Weekend (Sa-Su)",
+    day_mon:             "Monday",    day_tue: "Tuesday",   day_wed: "Wednesday",
+    day_thu:             "Thursday",  day_fri: "Friday",    day_sat: "Saturday", day_sun: "Sunday",
+    day_short_mon:       "Mo", day_short_tue: "Tu", day_short_wed: "We",
+    day_short_thu:       "Th", day_short_fri: "Fr", day_short_sat: "Sa", day_short_sun: "Su",
+    modal_edit:          "Edit schedule",
+    modal_new:           "New schedule",
+    modal_time_type:     "Time type",
+    modal_timetype_time: "Clock time",
+    modal_timetype_sun:  "☀️ Sunrise",
+    modal_timetype_set:  "🌙 Sunset",
+    modal_time:          "Time",
+    modal_offset:        "Offset (minutes, negative = before)",
+    modal_days:          "Weekdays",
+    modal_action:        "Action",
+    modal_position:      "Position (%)",
+    modal_enabled:       "Enabled",
+    modal_cancel:        "Cancel",
+    modal_save:          "Save",
+    modal_create:        "Create",
+    confirm_delete:      "Really delete schedule #{0}?",
+    ed_section_title:    "Title",
+    ed_section_content:  "Content",
+    ed_card_title:       "Card title",
+    ed_hide_title:       "Hide title",
+    ed_accent_color:     "Accent color",
+    ed_color_reset:      "reset",
+    ed_device_icon:      "Icon next to device name",
+    ed_badge_mode:       "Badge",
+    ed_badge_id:         "ID",
+    ed_badge_icon:       "Action icon",
+    ed_badge_none:       "None",
+    ed_day_display:      "Day display",
+    ed_day_text:         "Text",
+    ed_day_chips:        "Chips",
+    ed_show_webui:       "Show Web-UI link",
+    ed_show_action:      "Show action",
+    ed_show_run_btn:     "Show run button",
+    color_pick_title:    "Pick color",
+  },
+};
+
+/**
+ * Resolve a translation key synchronously from the cache.
+ * Falls back to bundled TRANSLATIONS if the async file hasn't loaded yet.
+ * Use optional positional placeholders: {0}, {1}, …
+ */
+function _tHelper(hass, key, ...args) {
+  const lang = (hass?.language || "de").split("-")[0];
+  const dict = _translationCache[lang] || TRANSLATIONS[lang] || TRANSLATIONS.de;
+  let s = dict[key] ?? (TRANSLATIONS[lang] || TRANSLATIONS.de)[key] ?? key;
+  args.forEach((a, i) => { s = s.replace(`{${i}}`, a); });
+  return s;
+}
+
+// ── Internal key mappings (German label → translation key) ────────────────────
+
+const ACTION_KEY_MAP = {
+  "Einschalten": "action_on",   "Ausschalten": "action_off",
+  "Öffnen":      "action_open", "Schließen":   "action_close",
+  "Stoppen":     "action_stop", "Position":    "action_position",
+};
+
+const DAYS_KEY_MAP = {
+  "Täglich":          "day_daily",
+  "Werktags (Mo-Fr)": "day_workdays",
+  "Wochenende (Sa-So)": "day_weekend",
+  "Montag": "day_mon", "Dienstag": "day_tue", "Mittwoch": "day_wed",
+  "Donnerstag": "day_thu", "Freitag": "day_fri",
+  "Samstag": "day_sat", "Sonntag": "day_sun",
+};
+
+const DAY_SHORT_KEY_MAP = {
+  MON: "day_short_mon", TUE: "day_short_tue", WED: "day_short_wed",
+  THU: "day_short_thu", FRI: "day_short_fri", SAT: "day_short_sat", SUN: "day_short_sun",
+};
+
+// ── Cron data (internal, language-independent) ────────────────────────────────
+
 const DAYS_OPTIONS = [
-  "Täglich",
-  "Werktags (Mo-Fr)",
-  "Wochenende (Sa-So)",
+  "Täglich", "Werktags (Mo-Fr)", "Wochenende (Sa-So)",
   "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag",
 ];
 
@@ -35,11 +241,13 @@ function daysToActiveSet(daysVal) {
   return new Set(src.split(",").map(d => d.trim().toUpperCase()).filter(d => DAY_LABEL[d]));
 }
 
-function renderDayChips(daysVal) {
+/** Render day chips. Pass a translate function t(key) for localised short labels. */
+function renderDayChips(daysVal, t) {
   const active = daysToActiveSet(daysVal);
-  return DAY_ORDER.map(d =>
-    `<span class="day-chip${active.has(d) ? " active" : ""}">${DAY_LABEL[d]}</span>`
-  ).join("");
+  return DAY_ORDER.map(d => {
+    const label = t ? t(DAY_SHORT_KEY_MAP[d]) : DAY_LABEL[d];
+    return `<span class="day-chip${active.has(d) ? " active" : ""}">${label}</span>`;
+  }).join("");
 }
 
 function parseCron(timespec) {
@@ -103,6 +311,7 @@ function parseCron(timespec) {
   return { timeType: "time", time: `${hour}:${min}`, days: dayLabel };
 }
 
+/** Returns internal German action key (used as select option value). */
 function callPart(c) {
   const m = (c.method || "").toLowerCase();
   if (m.includes("switch.set")) return c.params?.on ? "Einschalten" : "Ausschalten";
@@ -134,16 +343,26 @@ class ShellyScheduleCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
   }
 
+  /** Translate a key using the current HA language. */
+  _t(key, ...args) { return _tHelper(this._hass, key, ...args); }
+
   setConfig(config) {
     this._config = config || {};
     if (this._attached) this._render();
   }
 
   set hass(hass) {
+    const prevLang = this._hass?.language;
     this._hass = hass;
+    const newLang = (hass?.language || "de").split("-")[0];
+
     if (!this._attached) {
       this._attached = true;
-      this._render();
+      // Load translation file first, then render
+      _loadTranslationFile(newLang).then(() => this._render());
+    } else if (prevLang !== hass?.language) {
+      // Language changed — reload translations and re-render
+      _loadTranslationFile(newLang).then(() => this._render());
     } else {
       this._updateContent();
     }
@@ -294,7 +513,7 @@ class ShellyScheduleCard extends HTMLElement {
   _render() {
     const icon      = this._config.icon;
     const color     = this._config.color      || "var(--primary-color)";
-    const title     = this._config.title      || "Shelly Schedules";
+    const title     = this._config.title      || this._t("default_title");
     const hideTitle = !!this._config.hide_title;
     this.shadowRoot.innerHTML = `
       <style>${this._css()}</style>
@@ -322,13 +541,13 @@ class ShellyScheduleCard extends HTMLElement {
     const configuredEntity = this._config.entity;
 
     if (!configuredEntity) {
-      body.innerHTML = `<div class="empty-state">Bitte eine Entität unter <b>Bearbeiten</b> auswählen.</div>`;
+      body.innerHTML = `<div class="empty-state">${this._t("no_entity")}</div>`;
       return;
     }
 
     const state = this._hass.states[configuredEntity];
     if (!state) {
-      body.innerHTML = `<div class="empty-state">Entität <b>${configuredEntity}</b> nicht gefunden.</div>`;
+      body.innerHTML = `<div class="empty-state">${this._t("entity_not_found", `<b>${configuredEntity}</b>`)}</div>`;
       return;
     }
 
@@ -368,7 +587,7 @@ class ShellyScheduleCard extends HTMLElement {
   }
 
   _renderSection(type, devices) {
-    const label = type === "gen1" ? "Gen1 Geräte" : "Gen2/Gen3 Geräte";
+    const label = type === "gen1" ? this._t("section_gen1") : this._t("section_gen2");
     let html = `<div style="padding:6px 16px 2px;font-size:0.75em;font-weight:600;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.05em;">${label}</div>`;
 
     for (const dev of devices) {
@@ -385,8 +604,10 @@ class ShellyScheduleCard extends HTMLElement {
     const webLink = (hostname && this._config?.hide_webui !== true)
       ? `<button class="btn-webui" data-entity="${dev.entityId}" data-hostname="${hostname}"
            style="display:inline-flex;align-items:center;gap:3px;font-size:0.75em;color:var(--primary-color);background:none;border:none;padding:2px 4px;cursor:pointer;border-radius:4px;line-height:1;"
-           title="Web-UI öffnen"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0;pointer-events:none;" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zm-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-7h-2v7z"/></svg> Web-UI</button>`
+           title="${this._t("webui_title")}"><svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:currentColor;flex-shrink:0;pointer-events:none;" aria-hidden="true"><path d="M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zm-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-7h-2v7z"/></svg> ${this._t("webui_btn")}</button>`
       : "";
+
+    const taskCount = jobs.length !== 1 ? `${jobs.length} ${this._t("task_plural")}` : `1 ${this._t("task_singular")}`;
 
     let html = `
       <div class="device-block" data-entity="${dev.entityId}" data-type="${type}">
@@ -397,20 +618,20 @@ class ShellyScheduleCard extends HTMLElement {
             ${webLink}
           </div>
           <div style="display:flex;gap:4px;align-items:center;">
-            ${isUnavailable ? '<span style="font-size:0.75em;color:var(--error-color);">Nicht erreichbar</span>' : `<span style="font-size:0.75em;color:var(--secondary-text-color);">${jobs.length} ${jobs.length !== 1 ? "Aufgaben" : "Aufgabe"}</span>`}
-            ${!isGen1 ? `<button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">+ Neu</button>` : ""}
+            ${isUnavailable ? `<span style="font-size:0.75em;color:var(--error-color);">${this._t("unavailable")}</span>` : `<span style="font-size:0.75em;color:var(--secondary-text-color);">${taskCount}</span>`}
+            ${!isGen1 ? `<button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>` : ""}
           </div>
         </div>
     `;
 
     if (!isUnavailable && jobs.length > 0) {
       html += `<ul class="schedule-list">`;
-      for (const job of (isGen1 ? jobs : jobs)) {
+      for (const job of jobs) {
         html += isGen1 ? this._renderGen1Rule(job, dev) : this._renderGen2Job(job, dev);
       }
       html += `</ul>`;
     } else if (!isUnavailable) {
-      html += `<div class="empty-state" style="padding:12px 16px;">Keine Zeitpläne</div>`;
+      html += `<div class="empty-state" style="padding:12px 16px;">${this._t("no_schedules")}</div>`;
     }
 
     html += `</div>`;
@@ -422,18 +643,21 @@ class ShellyScheduleCard extends HTMLElement {
     let timeDisplay;
     if (parsed.timeType === "sunrise") {
       const off = parsed.offset;
-      timeDisplay = "☀️ Sonnenaufgang" + (off > 0 ? ` +${off}min` : off < 0 ? ` ${off}min` : "");
+      timeDisplay = this._t("sunrise") + (off > 0 ? ` +${off}min` : off < 0 ? ` ${off}min` : "");
     } else if (parsed.timeType === "sunset") {
       const off = parsed.offset;
-      timeDisplay = "🌙 Sonnenuntergang" + (off > 0 ? ` +${off}min` : off < 0 ? ` ${off}min` : "");
+      timeDisplay = this._t("sunset") + (off > 0 ? ` +${off}min` : off < 0 ? ` ${off}min` : "");
     } else {
       timeDisplay = parsed.time;
     }
     const days   = parsed.days;
-    const action = (job.calls || []).map(callPart).join(", ");
+    // Translate action label; callPart returns internal German key
+    const actionKey = (job.calls || []).map(c => ACTION_KEY_MAP[callPart(c)] || callPart(c));
+    const actionLabel = actionKey.map(k => this._t(k)).join(", ");
+    const daysLabel = this._t(DAYS_KEY_MAP[days] || days) || days;
     const daysHtml = this._config?.day_display === "chips"
-      ? `<div class="day-chips">${renderDayChips(days)}</div>`
-      : days;
+      ? `<div class="day-chips">${renderDayChips(days, k => this._t(k))}</div>`
+      : daysLabel;
     const enabled = job.enable !== false;
     const firstCall = (job.calls || [])[0];
     const badgeMode = this._config?.badge_mode ?? "id";
@@ -445,18 +669,18 @@ class ShellyScheduleCard extends HTMLElement {
         ${badgeMode !== "none" ? `<div class="sched-id ${enabled ? "" : "disabled"}">${badge}</div>` : ""}
         <div class="sched-info">
           <div class="sched-time">${timeDisplay}</div>
-          <div class="sched-details">${daysHtml}${this._config?.hide_action ? "" : " · " + action}</div>
+          <div class="sched-details">${daysHtml}${this._config?.hide_action ? "" : " · " + actionLabel}</div>
         </div>
         <div class="sched-actions">
-          <label class="sw-toggle" title="${enabled ? "Deaktivieren" : "Aktivieren"}">
+          <label class="sw-toggle" title="${enabled ? this._t("tooltip_disable") : this._t("tooltip_enable")}">
             <input type="checkbox" class="btn-toggle" ${enabled ? "checked" : ""} data-id="${job.id}" data-entity="${dev.entityId}" data-enabled="${enabled}">
             <span class="sw-slider"></span>
           </label>
-          ${this._config?.hide_run_button ? "" : `<button class="btn-icon btn-test" title="Jetzt ausführen" data-calls='${JSON.stringify(job.calls || []).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}"><ha-icon icon="mdi:play-circle-outline"></ha-icon></button>`}
-          <button class="btn-icon btn-edit" title="Bearbeiten" data-job='${JSON.stringify(job).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}">
+          ${this._config?.hide_run_button ? "" : `<button class="btn-icon btn-test" title="${this._t("tooltip_run")}" data-calls='${JSON.stringify(job.calls || []).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}"><ha-icon icon="mdi:play-circle-outline"></ha-icon></button>`}
+          <button class="btn-icon btn-edit" title="${this._t("tooltip_edit")}" data-job='${JSON.stringify(job).replace(/'/g, "&#39;")}' data-entity="${dev.entityId}">
             <ha-icon icon="mdi:pencil"></ha-icon>
           </button>
-          <button class="btn-icon btn-delete" title="Löschen" data-id="${job.id}" data-entity="${dev.entityId}">
+          <button class="btn-icon btn-delete" title="${this._t("tooltip_delete")}" data-id="${job.id}" data-entity="${dev.entityId}">
             <ha-icon icon="mdi:delete"></ha-icon>
           </button>
         </div>
@@ -474,12 +698,13 @@ class ShellyScheduleCard extends HTMLElement {
     const gen1Badge = gen1BadgeMode === "none" ? "" :
       gen1BadgeMode === "icon" ? `<ha-icon icon="${action === "on" ? "mdi:power" : "mdi:power-off"}"></ha-icon>` :
       "·";
+    const actionLabel = action === "on" ? this._t("action_on") : this._t("action_off");
     return `
       <li class="schedule-item" data-entity="${dev.entityId}">
         ${gen1BadgeMode !== "none" ? `<div class="sched-id">${gen1Badge}</div>` : ""}
         <div class="sched-info">
           <div class="sched-time">${hour}:${min}</div>
-          <div class="sched-details">${this._config?.hide_action ? "" : (action === "on" ? "Einschalten" : "Ausschalten")}</div>
+          <div class="sched-details">${this._config?.hide_action ? "" : actionLabel}</div>
         </div>
       </li>
     `;
@@ -542,7 +767,7 @@ class ShellyScheduleCard extends HTMLElement {
       if (delBtn) {
         const id = parseInt(delBtn.dataset.id);
         const deviceName = this._entityToDeviceName(delBtn.dataset.entity);
-        if (confirm(`Aufgabe #${id} wirklich löschen?`)) {
+        if (confirm(this._t("confirm_delete", id))) {
           this._callService("delete_schedule", { device: deviceName, schedule_id: id });
         }
         return;
@@ -587,18 +812,19 @@ class ShellyScheduleCard extends HTMLElement {
       ? ["Öffnen", "Schließen", "Stoppen", "Position"]
       : ["Einschalten", "Ausschalten"];
 
+    // Time type options with translated labels; value stays as internal key
     const timeTypeOpts = [
-      ["time",    "Uhrzeit"],
-      ["sunrise", "☀️ Sonnenaufgang"],
-      ["sunset",  "🌙 Sonnenuntergang"],
+      ["time",    this._t("modal_timetype_time")],
+      ["sunrise", this._t("modal_timetype_sun")],
+      ["sunset",  this._t("modal_timetype_set")],
     ].map(([v, l]) => `<option value="${v}" ${v === timeType ? "selected" : ""}>${l}</option>`).join("");
 
-        // Convert parsed days label / raw cron string → Set of cron day codes
+    // Convert parsed days label / raw cron string → Set of cron day codes
     const WDAYS = [
-      { label: "Mo", cron: "MON" }, { label: "Di", cron: "TUE" },
-      { label: "Mi", cron: "WED" }, { label: "Do", cron: "THU" },
-      { label: "Fr", cron: "FRI" }, { label: "Sa", cron: "SAT" },
-      { label: "So", cron: "SUN" },
+      { labelKey: "day_short_mon", cron: "MON" }, { labelKey: "day_short_tue", cron: "TUE" },
+      { labelKey: "day_short_wed", cron: "WED" }, { labelKey: "day_short_thu", cron: "THU" },
+      { labelKey: "day_short_fri", cron: "FRI" }, { labelKey: "day_short_sat", cron: "SAT" },
+      { labelKey: "day_short_sun", cron: "SUN" },
     ];
     const ALL_CRON = new Set(WDAYS.map(d => d.cron));
     function daysToSet(daysVal) {
@@ -613,11 +839,13 @@ class ShellyScheduleCard extends HTMLElement {
     const dayCheckboxes = WDAYS.map(d =>
       `<label style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-size:0.82em;user-select:none;">
         <input type="checkbox" class="m-day-cb" data-cron="${d.cron}" ${checkedSet.has(d.cron) ? "checked" : ""} style="cursor:pointer;width:16px;height:16px;accent-color:var(--primary-color);">
-        ${d.label}
+        ${this._t(d.labelKey)}
       </label>`
     ).join("");
+
+    // Action options: value=internal German key, display=translated label
     const actionOpts = availableActions.map(a =>
-      `<option value="${a}" ${a === action ? "selected" : ""}>${a}</option>`
+      `<option value="${a}" ${a === action ? "selected" : ""}>${this._t(ACTION_KEY_MAP[a] || a)}</option>`
     ).join("");
 
     const S = {
@@ -638,38 +866,38 @@ class ShellyScheduleCard extends HTMLElement {
     backdrop.style.cssText = S.backdrop;
     backdrop.innerHTML = `
       <div style="${S.modal}">
-        <h3 style="${S.h3}">${isEdit ? "Aufgabe bearbeiten" : "Neue Aufgabe"} – ${dev.name}</h3>
+        <h3 style="${S.h3}">${isEdit ? this._t("modal_edit") : this._t("modal_new")} – ${dev.name}</h3>
         <div style="${S.row}">
-          <label style="${S.label}">Zeittyp</label>
+          <label style="${S.label}">${this._t("modal_time_type")}</label>
           <select id="m-timetype" style="${S.field}">${timeTypeOpts}</select>
         </div>
         <div id="m-time-row" style="${S.row}display:${isSun ? "none" : "block"}">
-          <label style="${S.label}">Uhrzeit</label>
+          <label style="${S.label}">${this._t("modal_time")}</label>
           <input type="time" id="m-time" value="${time}" style="${S.field}">
         </div>
         <div id="m-sun-row" style="${S.row}display:${isSun ? "block" : "none"}">
-          <label style="${S.label}">Versatz (Minuten, negativ = davor)</label>
+          <label style="${S.label}">${this._t("modal_offset")}</label>
           <input type="number" id="m-offset" min="-120" max="120" step="5" value="${sunOffset}" style="${S.field}">
         </div>
         <div id="m-days-row" style="${S.row}display:block">
-          <label style="${S.label}">Wochentage</label>
+          <label style="${S.label}">${this._t("modal_days")}</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">${dayCheckboxes}</div>
         </div>
         <div style="${S.row}">
-          <label style="${S.label}">Aktion</label>
+          <label style="${S.label}">${this._t("modal_action")}</label>
           <select id="m-action" style="${S.field}">${actionOpts}</select>
         </div>
         <div id="pos-row" style="${S.row}display:${action === "Position" ? "block" : "none"}">
-          <label style="${S.label}">Position (%)</label>
+          <label style="${S.label}">${this._t("modal_position")}</label>
           <input type="number" id="m-pos" min="0" max="100" value="${pos}" style="${S.field}">
         </div>
         <div style="${S.toggle}">
           <input type="checkbox" id="m-enabled" ${enabled ? "checked" : ""}>
-          <label for="m-enabled">Aktiviert</label>
+          <label for="m-enabled">${this._t("modal_enabled")}</label>
         </div>
         <div style="${S.actions}">
-          <button id="m-cancel" style="${S.btnSec}">Abbrechen</button>
-          <button id="m-save"   style="${S.btnPri}">${isEdit ? "Speichern" : "Erstellen"}</button>
+          <button id="m-cancel" style="${S.btnSec}">${this._t("modal_cancel")}</button>
+          <button id="m-save"   style="${S.btnPri}">${isEdit ? this._t("modal_save") : this._t("modal_create")}</button>
         </div>
       </div>
     `;
@@ -819,6 +1047,9 @@ class ShellyScheduleCardEditor extends HTMLElement {
     this._rendered = false;
   }
 
+  /** Translate a key using the current HA language. */
+  _t(key, ...args) { return _tHelper(this._hass, key, ...args); }
+
   setConfig(config) {
     this._config = config || {};
     if (this._rendered) {
@@ -833,6 +1064,8 @@ class ShellyScheduleCardEditor extends HTMLElement {
       if (hideWebuiEl)  hideWebuiEl.checked  = this._config.hide_webui !== true;
       const hideActionEl = this.querySelector("#ed-hide-action");
       if (hideActionEl) hideActionEl.checked = this._config.hide_action !== true;
+      const hideRunBtnEl = this.querySelector("#ed-hide-run-button");
+      if (hideRunBtnEl) hideRunBtnEl.checked = this._config.hide_run_button !== true;
       const badgeModeEl = this.querySelector("#ed-badge-mode");
       if (badgeModeEl) badgeModeEl.value = this._config.badge_mode ?? "id";
       const dayDisplayEl = this.querySelector("#ed-day-display");
@@ -848,9 +1081,16 @@ class ShellyScheduleCardEditor extends HTMLElement {
   }
 
   set hass(hass) {
+    const prevLang = this._hass?.language;
     this._hass = hass;
+    const newLang = (hass?.language || "de").split("-")[0];
+
     if (!this._rendered) {
-      this._renderEditor();
+      _loadTranslationFile(newLang).then(() => this._renderEditor());
+    } else if (prevLang !== hass?.language) {
+      // Language changed — re-render editor with new translations
+      this._rendered = false;
+      _loadTranslationFile(newLang).then(() => this._renderEditor());
     } else {
       this._updateEntitySelect();
       const nameForm = this.querySelector("#ed-name-form");
@@ -870,7 +1110,7 @@ class ShellyScheduleCardEditor extends HTMLElement {
       .sort();
     const current = this._config.entity || "";
     sel.innerHTML =
-      `<option value="">– Entität wählen –</option>` +
+      `<option value="">${this._t("pick_entity")}</option>` +
       entities.map(eid => {
         const rawName = this._hass.states[eid]?.attributes?.friendly_name || eid;
         const name = rawName.replace(/\bshelly\b\s*/i, "").replace(/\s*schedule$/i, "").trim();
@@ -890,6 +1130,7 @@ class ShellyScheduleCardEditor extends HTMLElement {
   }
 
   _renderEditor() {
+    const t = (key) => this._t(key);
     const fieldStyle = `
       width: 100%; box-sizing: border-box;
       padding: 10px 12px; border-radius: 6px;
@@ -945,7 +1186,7 @@ class ShellyScheduleCardEditor extends HTMLElement {
       </style>
       <div style="padding: 0 16px 16px;">
 
-        <div style="font-size:.75em;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);padding:16px 0 6px;">Entität</div>
+        <div style="font-size:.75em;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color);padding:16px 0 6px;">${t("section_entity")}</div>
         <div class="ed-row">
           <select id="ed-entity" style="${fieldStyle}"></select>
         </div>
@@ -953,24 +1194,24 @@ class ShellyScheduleCardEditor extends HTMLElement {
         <div class="ed-section">
           <div class="ed-section-header" data-target="sec-titel">
             <ha-icon class="ed-section-icon" icon="mdi:format-title"></ha-icon>
-            <span class="ed-section-title">Titel</span>
+            <span class="ed-section-title">${t("ed_section_title")}</span>
             <ha-icon class="ed-chevron open" icon="mdi:chevron-up"></ha-icon>
           </div>
           <div id="sec-titel" class="ed-section-body">
             <div class="ed-row">
-              <ha-textfield id="ed-title" label="Kartentitel" placeholder="Shelly Schedules" style="width:100%;"></ha-textfield>
+              <ha-textfield id="ed-title" label="${t("ed_card_title")}" placeholder="Shelly Schedules" style="width:100%;"></ha-textfield>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;">
-              <label for="ed-hide-title" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Titel ausblenden</label>
+              <label for="ed-hide-title" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">${t("ed_hide_title")}</label>
               <ha-switch id="ed-hide-title"></ha-switch>
             </div>
             <div class="ed-row">
               <ha-icon-picker id="ed-icon" label="Icon"></ha-icon-picker>
             </div>
             <div class="ed-color-row">
-              <span>Akzentfarbe</span>
-              <input id="ed-color-titel" type="color" title="Farbe wählen">
-              <span class="ed-color-clear" id="ed-color-clear-titel">zurücksetzen</span>
+              <span>${t("ed_accent_color")}</span>
+              <input id="ed-color-titel" type="color" title="${t("color_pick_title")}">
+              <span class="ed-color-clear" id="ed-color-clear-titel">${t("ed_color_reset")}</span>
             </div>
           </div>
         </div>
@@ -978,7 +1219,7 @@ class ShellyScheduleCardEditor extends HTMLElement {
         <div class="ed-section">
           <div class="ed-section-header" data-target="sec-inhalt">
             <ha-icon class="ed-section-icon" icon="mdi:format-list-bulleted"></ha-icon>
-            <span class="ed-section-title">Inhalt</span>
+            <span class="ed-section-title">${t("ed_section_content")}</span>
             <ha-icon class="ed-chevron open" icon="mdi:chevron-up"></ha-icon>
           </div>
           <div id="sec-inhalt" class="ed-section-body">
@@ -986,39 +1227,39 @@ class ShellyScheduleCardEditor extends HTMLElement {
               <ha-form id="ed-name-form"></ha-form>
             </div>
             <div class="ed-row">
-              <ha-icon-picker id="ed-device-icon" label="Icon neben Gerätename"></ha-icon-picker>
+              <ha-icon-picker id="ed-device-icon" label="${t("ed_device_icon")}"></ha-icon-picker>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-              <label style="font-size:.9em;color:var(--primary-text-color);flex:1;">Listenbadge</label>
+              <label style="font-size:.9em;color:var(--primary-text-color);flex:1;">${t("ed_badge_mode")}</label>
               <select id="ed-badge-mode" style="font-size:.9em;padding:4px 6px;border-radius:6px;border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color);cursor:pointer;">
-                <option value="id">ID</option>
-                <option value="icon">Aktionssymbol</option>
-                <option value="none">Nichts</option>
+                <option value="id">${t("ed_badge_id")}</option>
+                <option value="icon">${t("ed_badge_icon")}</option>
+                <option value="none">${t("ed_badge_none")}</option>
               </select>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-              <label style="font-size:.9em;color:var(--primary-text-color);flex:1;">Tagesanzeige</label>
+              <label style="font-size:.9em;color:var(--primary-text-color);flex:1;">${t("ed_day_display")}</label>
               <select id="ed-day-display" style="font-size:.9em;padding:4px 6px;border-radius:6px;border:1px solid var(--divider-color);background:var(--card-background-color);color:var(--primary-text-color);cursor:pointer;">
-                <option value="text">Text</option>
-                <option value="chips">Chips</option>
+                <option value="text">${t("ed_day_text")}</option>
+                <option value="chips">${t("ed_day_chips")}</option>
               </select>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;">
-              <label for="ed-hide-webui" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Web-UI Link anzeigen</label>
+              <label for="ed-hide-webui" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">${t("ed_show_webui")}</label>
               <ha-switch id="ed-hide-webui"></ha-switch>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;">
-              <label for="ed-hide-action" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Aktion anzeigen</label>
+              <label for="ed-hide-action" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">${t("ed_show_action")}</label>
               <ha-switch id="ed-hide-action"></ha-switch>
             </div>
             <div class="ed-row" style="display:flex;align-items:center;justify-content:space-between;">
-              <label for="ed-hide-run-button" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">Ausführen-Button anzeigen</label>
+              <label for="ed-hide-run-button" style="font-size:.9em;color:var(--primary-text-color);cursor:pointer;">${t("ed_show_run_btn")}</label>
               <ha-switch id="ed-hide-run-button"></ha-switch>
             </div>
             <div class="ed-color-row">
-              <span>Akzentfarbe</span>
-              <input id="ed-color" type="color" title="Farbe wählen">
-              <span class="ed-color-clear" id="ed-color-clear">zurücksetzen</span>
+              <span>${t("ed_accent_color")}</span>
+              <input id="ed-color" type="color" title="${t("color_pick_title")}">
+              <span class="ed-color-clear" id="ed-color-clear">${t("ed_color_reset")}</span>
             </div>
           </div>
         </div>
