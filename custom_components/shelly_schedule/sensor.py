@@ -1,4 +1,10 @@
-"""Shelly Schedule sensor platform."""
+"""Shelly Schedule sensor platform.
+
+Creates one ShellyScheduleSensor per discovered Shelly device.
+The sensor state holds the number of active schedules; attributes contain
+the full job list (Gen2/Gen3) or schedule rules (Gen1) used by the Lovelace card.
+Sensors are registered dynamically by the coordinator after device discovery.
+"""
 from __future__ import annotations
 import logging
 
@@ -8,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, device_name_to_slug
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,9 +49,7 @@ class ShellyScheduleSensor(SensorEntity):
         self._hostname = hostname
         self._gen = gen
 
-        # Build slug for unique_id and entity_id (same logic as _name_to_entity_id)
-        slug = device_name.lower().replace(" ", "_").replace("-", "_")
-        clean = "".join(c for c in slug if ("a" <= c <= "z") or ("0" <= c <= "9") or c == "_")
+        clean = device_name_to_slug(device_name)
         prefix = "shelly" if gen >= 2 else "shelly_gen1"
         self._attr_unique_id = f"shelly_schedule_{prefix}_{clean}"
         # Preserve existing entity IDs so dashboards keep working

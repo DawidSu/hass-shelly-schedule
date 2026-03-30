@@ -1,4 +1,9 @@
-"""Time entity for Shelly Schedule."""
+"""Time entity for Shelly Schedule.
+
+Provides a single TimeEntity (ShellyTimeEntity) that holds the clock time
+used when building cron timespecs for create_schedule / gen1_set_schedule
+service calls.  Default value: 07:00.
+"""
 from __future__ import annotations
 
 from datetime import time as dt_time

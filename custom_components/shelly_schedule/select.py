@@ -1,4 +1,15 @@
-"""Select entities for Shelly Schedule."""
+"""Select entities for Shelly Schedule.
+
+Provides four select entities used as service-call parameters:
+
+- ShellyDeviceSelect  – active Gen2/Gen3 device (populated dynamically after discovery)
+- ShellyDeviceSelect  – active Gen1 device (same class, gen1=True)
+- ShellyFixedSelect   – weekday selector (Täglich … Sonntag)
+- ShellyFixedSelect   – action selector (Einschalten / Ausschalten / Öffnen …)
+
+All entities belong to the virtual "Shelly Schedule" service device and are
+EntityCategory.CONFIG so they don't appear on the main dashboard.
+"""
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity

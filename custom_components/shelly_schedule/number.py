@@ -1,4 +1,12 @@
-"""Number entities for Shelly Schedule."""
+"""Number entities for Shelly Schedule.
+
+Provides two number entities used as service-call parameters:
+
+- ShellyNumber (schedule_id)  – integer 1–99, used for enable/disable/delete
+- ShellyNumber (position)     – integer 0–100 %, used for Cover.GoToPosition
+
+Both entities belong to the virtual "Shelly Schedule" service device.
+"""
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode

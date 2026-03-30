@@ -1,4 +1,10 @@
-"""Switch entity for Shelly Schedule Gen1."""
+"""Switch entity for Shelly Schedule Gen1.
+
+Provides ShellyGen1Switch — a simple on/off toggle that determines whether
+a Gen1 schedule rule should turn the relay on or off.  Read by the
+gen1_set_schedule service handler to build the rule string
+("<minute> <hour> * * *=on|off").
+"""
 from __future__ import annotations
 
 from homeassistant.components.switch import SwitchEntity

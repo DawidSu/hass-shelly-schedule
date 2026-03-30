@@ -1,4 +1,15 @@
-"""Config flow for Shelly Schedule."""
+"""Config flow for Shelly Schedule.
+
+Setup flow (ShellyScheduleConfigFlow):
+  - user step: no credentials needed; creates the single config entry.
+
+Options flow (ShellyScheduleOptionsFlow):
+  - init step: lists all Shelly devices discovered via the Shelly integration.
+  - device_password step: lets the user enter per-device credential overrides
+    (Gen2/Gen3: Digest-Auth password; Gen1: Basic-Auth username + password).
+
+Stored credentials override those read from the Shelly integration config entries.
+"""
 from __future__ import annotations
 
 import voluptuous as vol

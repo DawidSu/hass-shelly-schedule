@@ -1,4 +1,4 @@
-"""Shelly Schedule – native HA custom integration (v0.2.0).
+"""Shelly Schedule – native HA custom integration.
 
 Config-flow based setup: Settings → Integrations → Add Integration → Shelly Schedule.
 Supports Gen2/Gen3 (Digest-Auth) and Gen1 (Basic-Auth) Shelly devices.
@@ -12,6 +12,9 @@ import logging
 import os
 from datetime import timedelta
 from functools import partial
+
+import requests
+from requests.auth import HTTPBasicAuth, HTTPDigestAuth
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import EVENT_HOMEASSISTANT_START, EVENT_HOMEASSISTANT_STARTED
@@ -28,6 +31,7 @@ from .const import (
     CONF_GEN1_USERNAME,
     CONF_GEN1_PASSWORD,
     CONF_DEVICE_CREDENTIALS,
+    device_name_to_slug,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,17 +42,8 @@ PLATFORMS = ["select", "number", "time", "switch", "sensor"]
 # ── Slug helper ───────────────────────────────────────────────────────────────
 
 def _name_to_entity_id(name: str, prefix: str = "shelly") -> str:
-    """Convert a device display name to a valid HA sensor entity ID.
-
-    Uses a char-by-char loop stripping non-ASCII / non-alphanumeric chars
-    (NFKD normalisation approach without unicodedata dependency).
-    """
-    slug = name.lower().replace(" ", "_").replace("-", "_")
-    clean = ""
-    for ch in slug:
-        if ("a" <= ch <= "z") or ("0" <= ch <= "9") or ch == "_":
-            clean += ch
-    return f"sensor.{prefix}_{clean}_schedule"
+    """Convert a device display name to a valid HA sensor entity ID."""
+    return f"sensor.{prefix}_{device_name_to_slug(name)}_schedule"
 
 
 # ── Blocking HTTP helpers (run via executor) ──────────────────────────────────
@@ -56,9 +51,6 @@ def _name_to_entity_id(name: str, prefix: str = "shelly") -> str:
 def _http_get_sync(hostname: str, path: str, password: str) -> dict | None:
     """Synchronous GET to Shelly RPC endpoint (Digest-Auth)."""
     try:
-        import requests
-        from requests.auth import HTTPDigestAuth
-
         url = f"http://{hostname}/rpc/{path}"
         resp = requests.get(url, auth=HTTPDigestAuth("admin", password), timeout=10)
         resp.raise_for_status()
@@ -71,9 +63,6 @@ def _http_get_sync(hostname: str, path: str, password: str) -> dict | None:
 def _http_post_sync(hostname: str, method: str, payload: str, password: str) -> dict | None:
     """Synchronous POST to Shelly RPC endpoint (Digest-Auth)."""
     try:
-        import requests
-        from requests.auth import HTTPDigestAuth
-
         url = f"http://{hostname}/rpc/{method}"
         resp = requests.post(
             url,
@@ -92,9 +81,6 @@ def _http_post_sync(hostname: str, method: str, payload: str, password: str) -> 
 def _gen1_http_get_sync(hostname: str, path: str, user: str, password: str) -> dict | None:
     """Synchronous GET to Shelly Gen1 endpoint (Basic-Auth)."""
     try:
-        import requests
-        from requests.auth import HTTPBasicAuth
-
         url = f"http://{hostname}/{path}"
         resp = requests.get(url, auth=HTTPBasicAuth(user, password), timeout=10)
         resp.raise_for_status()
@@ -109,9 +95,6 @@ def _gen1_http_post_form_sync(
 ) -> bytes | None:
     """Synchronous POST with form data to Shelly Gen1 endpoint (Basic-Auth)."""
     try:
-        import requests
-        from requests.auth import HTTPBasicAuth
-
         url = f"http://{hostname}/{path}"
         resp = requests.post(url, data=params, auth=HTTPBasicAuth(user, password), timeout=10)
         resp.raise_for_status()
@@ -119,6 +102,20 @@ def _gen1_http_post_form_sync(
     except Exception as exc:
         _LOGGER.error("Shelly Gen1 POST error %s/%s: %s", hostname, path, exc)
         return None
+
+
+def _find_device_identifiers(hass, device_reg, name: str):
+    """Find HA device identifiers for a Shelly device by display name."""
+    dev_id = None
+    for dev in device_reg.devices.values():
+        for entry in hass.config_entries.async_entries("shelly"):
+            if entry.entry_id in dev.config_entries and (dev.name_by_user or dev.name) == name:
+                dev_id = dev.id
+                break
+        if dev_id:
+            break
+    dev_entry = device_reg.async_get(dev_id) if dev_id else None
+    return dev_entry.identifiers if dev_entry else None
 
 
 # ── Coordinator ───────────────────────────────────────────────────────────────
@@ -257,31 +254,13 @@ class ShellyScheduleCoordinator:
             new_entities = []
             for name, host in new_gen2.items():
                 if name not in self._sensors:
-                    dev_id = None
-                    for dev in device_reg.devices.values():
-                        for entry in self.hass.config_entries.async_entries("shelly"):
-                            if entry.entry_id in dev.config_entries and (dev.name_by_user or dev.name) == name:
-                                dev_id = dev.id
-                                break
-                        if dev_id:
-                            break
-                    dev_entry = device_reg.async_get(dev_id) if dev_id else None
-                    identifiers = dev_entry.identifiers if dev_entry else {(DOMAIN, name)}
+                    identifiers = _find_device_identifiers(self.hass, device_reg, name) or {(DOMAIN, name)}
                     sensor = ShellyScheduleSensor(self, name, host, 2, identifiers)
                     self._sensors[name] = sensor
                     new_entities.append(sensor)
             for name, host in new_gen1.items():
                 if name not in self._sensors:
-                    dev_id = None
-                    for dev in device_reg.devices.values():
-                        for entry in self.hass.config_entries.async_entries("shelly"):
-                            if entry.entry_id in dev.config_entries and (dev.name_by_user or dev.name) == name:
-                                dev_id = dev.id
-                                break
-                        if dev_id:
-                            break
-                    dev_entry = device_reg.async_get(dev_id) if dev_id else None
-                    identifiers = dev_entry.identifiers if dev_entry else {(DOMAIN, f"gen1_{name}")}
+                    identifiers = _find_device_identifiers(self.hass, device_reg, name) or {(DOMAIN, f"gen1_{name}")}
                     sensor = ShellyScheduleSensor(self, name, host, 1, identifiers)
                     self._sensors[name] = sensor
                     new_entities.append(sensor)
@@ -311,7 +290,6 @@ class ShellyScheduleCoordinator:
             data = await self.hass.async_add_executor_job(
                 _http_get_sync, hostname, "Schedule.List", password
             )
-            _, password = self._get_credentials(name, 2)
             if data is not None:
                 jobs = data.get("jobs", [])
                 profile = self._device_profiles.get(name, "switch")
@@ -372,6 +350,21 @@ def _resolve_device(
         _LOGGER.error("resolve_device: no device selected")
         return None, None
     return name, coord.device_map.get(name)
+
+
+def _resolve_gen1_device(
+    coord: "ShellyScheduleCoordinator",
+) -> tuple[str | None, str | None, str | None]:
+    """Return (device_name, hostname, error_msg) for the selected Gen1 device."""
+    if coord.gen1_device_select is None:
+        return None, None, "gen1_device_select not initialised"
+    name = coord.gen1_device_select._attr_current_option
+    if not name or name == "–":
+        return None, None, "No Gen1 device selected"
+    hostname = coord.gen1_device_map.get(name)
+    if not hostname:
+        return None, None, f"Gen1 device unknown: {name}"
+    return name, hostname, None
 
 
 # ── Service handler implementations ──────────────────────────────────────────
@@ -483,32 +476,30 @@ async def _svc_delete_schedule(coord: ShellyScheduleCoordinator, call: ServiceCa
         await coord.update_sensors()
 
 
-async def _svc_enable_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
-    """Service: enable a schedule by ID on the selected Gen2/Gen3 device."""
+async def _svc_set_schedule_enabled(
+    coord: ShellyScheduleCoordinator, call: ServiceCall, enable: bool
+) -> None:
+    """Shared helper: enable or disable a schedule by ID."""
     geraet_name, hostname = _resolve_device(coord, call)
     if not hostname:
         return
     schedule_id = int(call.data.get("schedule_id") or coord.schedule_id_number._attr_native_value or 1)
     _, password = coord._get_credentials(geraet_name, 2)
     result = await coord.hass.async_add_executor_job(
-        _http_post_sync, hostname, "Schedule.Update", json.dumps({"id": schedule_id, "enable": True}), password,
+        _http_post_sync, hostname, "Schedule.Update", json.dumps({"id": schedule_id, "enable": enable}), password,
     )
     if result is not None:
         await coord.update_sensors()
+
+
+async def _svc_enable_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
+    """Service: enable a schedule by ID on the selected Gen2/Gen3 device."""
+    await _svc_set_schedule_enabled(coord, call, True)
 
 
 async def _svc_disable_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: disable a schedule by ID on the selected Gen2/Gen3 device."""
-    geraet_name, hostname = _resolve_device(coord, call)
-    if not hostname:
-        return
-    schedule_id = int(call.data.get("schedule_id") or coord.schedule_id_number._attr_native_value or 1)
-    _, password = coord._get_credentials(geraet_name, 2)
-    result = await coord.hass.async_add_executor_job(
-        _http_post_sync, hostname, "Schedule.Update", json.dumps({"id": schedule_id, "enable": False}), password,
-    )
-    if result is not None:
-        await coord.update_sensors()
+    await _svc_set_schedule_enabled(coord, call, False)
 
 
 async def _svc_replace_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
@@ -519,15 +510,9 @@ async def _svc_replace_schedule(coord: ShellyScheduleCoordinator, call: ServiceC
 
 async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: set a schedule rule on the selected Gen1 device (replaces all rules)."""
-    if coord.gen1_device_select is None:
-        return
-    geraet_name = coord.gen1_device_select._attr_current_option
-    if not geraet_name or geraet_name == "–":
-        _LOGGER.error("No Gen1 device selected")
-        return
-    hostname = coord.gen1_device_map.get(geraet_name)
-    if not hostname:
-        _LOGGER.error("Gen1 device unknown: %s", geraet_name)
+    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    if err:
+        _LOGGER.error(err)
         return
 
     if coord.time_entity is None or coord.time_entity._attr_native_value is None:
@@ -558,11 +543,8 @@ async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: Service
 
 async def _svc_gen1_delete_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: delete all schedule rules from the selected Gen1 device."""
-    if coord.gen1_device_select is None:
-        return
-    geraet_name = coord.gen1_device_select._attr_current_option
-    hostname = coord.gen1_device_map.get(geraet_name)
-    if not hostname:
+    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    if err:
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
@@ -574,11 +556,8 @@ async def _svc_gen1_delete_schedule(coord: ShellyScheduleCoordinator, call: Serv
 
 async def _svc_gen1_enable_scheduling(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: enable scheduling on the selected Gen1 device."""
-    if coord.gen1_device_select is None:
-        return
-    geraet_name = coord.gen1_device_select._attr_current_option
-    hostname = coord.gen1_device_map.get(geraet_name)
-    if not hostname:
+    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    if err:
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
@@ -590,11 +569,8 @@ async def _svc_gen1_enable_scheduling(coord: ShellyScheduleCoordinator, call: Se
 
 async def _svc_gen1_disable_scheduling(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: disable scheduling on the selected Gen1 device."""
-    if coord.gen1_device_select is None:
-        return
-    geraet_name = coord.gen1_device_select._attr_current_option
-    hostname = coord.gen1_device_map.get(geraet_name)
-    if not hostname:
+    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    if err:
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
@@ -607,12 +583,12 @@ async def _svc_gen1_disable_scheduling(coord: ShellyScheduleCoordinator, call: S
 # ── Integration setup ─────────────────────────────────────────────────────────
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Backwards-compat stub for YAML setup (not used in v2.0)."""
+    """Backwards-compat stub — YAML setup is not used; config-flow only."""
     return True
 
 
 _LOVELACE_URL = "/shelly_schedule/shelly-schedule-card.js"
-_LOVELACE_RES_URL = f"{_LOVELACE_URL}?v=0.2.0"
+_LOVELACE_RES_URL = f"{_LOVELACE_URL}?v={int(os.path.getmtime(os.path.join(os.path.dirname(__file__), 'www', 'shelly-schedule-card.js.gz')))}"
 
 
 async def _register_lovelace_resource(hass: HomeAssistant) -> None:
@@ -726,7 +702,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         timedelta(seconds=SCAN_INTERVAL_SECONDS),
     )
 
-    _LOGGER.info("Shelly Schedule Manager v0.2.0 loaded.")
+    _LOGGER.info("Shelly Schedule loaded.")
     return True
 
 
