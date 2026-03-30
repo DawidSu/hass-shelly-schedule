@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shelly Schedule instellen",
+        "description": "Inloggegevens worden automatisch overgenomen uit de Shelly-integratie. Individuele overschrijvingen zijn mogelijk na de installatie onder opties."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule is al geconfigureerd."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Apparaat selecteren",
+        "description": "Selecteer een apparaat voor individuele inloggegevens.",
+        "data": { "device": "Apparaat" }
+      },
+      "device_password": {
+        "title": "Inloggegevens voor {device_name}",
+        "data": {
+          "gen2_password": "Wachtwoord",
+          "gen1_username": "Gebruikersnaam",
+          "gen1_password": "Wachtwoord"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Geen Shelly-apparaten gevonden. Stel eerst de Shelly-integratie in."
+    }
+  }
+}

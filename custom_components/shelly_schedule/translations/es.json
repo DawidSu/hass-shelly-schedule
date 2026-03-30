@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar Shelly Schedule",
+        "description": "Las credenciales se toman automáticamente de la integración Shelly. Se pueden configurar reemplazos individuales después en las opciones."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule ya está configurado."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Seleccionar dispositivo",
+        "description": "Seleccione un dispositivo para credenciales individuales.",
+        "data": { "device": "Dispositivo" }
+      },
+      "device_password": {
+        "title": "Credenciales para {device_name}",
+        "data": {
+          "gen2_password": "Contraseña",
+          "gen1_username": "Usuario",
+          "gen1_password": "Contraseña"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "No se encontraron dispositivos Shelly. Configure primero la integración Shelly."
+    }
+  }
+}

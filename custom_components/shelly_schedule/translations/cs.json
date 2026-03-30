@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nastavit Shelly Schedule",
+        "description": "Přihlašovací údaje jsou automaticky převzaty z integrace Shelly. Individuální přepsání je možné po nastavení v možnostech."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule je již nakonfigurován."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Vybrat zařízení",
+        "description": "Vyberte zařízení pro individuální přihlašovací údaje.",
+        "data": { "device": "Zařízení" }
+      },
+      "device_password": {
+        "title": "Přihlašovací údaje pro {device_name}",
+        "data": {
+          "gen2_password": "Heslo",
+          "gen1_username": "Uživatelské jméno",
+          "gen1_password": "Heslo"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Nebyla nalezena žádná zařízení Shelly. Nejprve nakonfigurujte integraci Shelly."
+    }
+  }
+}

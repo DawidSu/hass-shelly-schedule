@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurer Shelly Schedule",
+        "description": "Les identifiants sont repris automatiquement de l'intégration Shelly. Des remplacements individuels sont possibles après la configuration dans les options."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sélectionner un appareil",
+        "description": "Sélectionnez un appareil pour des identifiants individuels.",
+        "data": { "device": "Appareil" }
+      },
+      "device_password": {
+        "title": "Identifiants pour {device_name}",
+        "data": {
+          "gen2_password": "Mot de passe",
+          "gen1_username": "Nom d'utilisateur",
+          "gen1_password": "Mot de passe"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Aucun appareil Shelly trouvé. Configurez d'abord l'intégration Shelly."
+    }
+  }
+}

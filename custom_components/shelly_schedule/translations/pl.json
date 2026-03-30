@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skonfiguruj Shelly Schedule",
+        "description": "Dane logowania są pobierane automatycznie z integracji Shelly. Indywidualne nadpisania można skonfigurować po instalacji w opcjach."
+      }
+    },
+    "abort": {
+      "already_configured": "Shelly Schedule jest już skonfigurowany."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wybierz urządzenie",
+        "description": "Wybierz urządzenie dla indywidualnych danych logowania.",
+        "data": { "device": "Urządzenie" }
+      },
+      "device_password": {
+        "title": "Dane logowania dla {device_name}",
+        "data": {
+          "gen2_password": "Hasło",
+          "gen1_username": "Nazwa użytkownika",
+          "gen1_password": "Hasło"
+        }
+      }
+    },
+    "abort": {
+      "no_devices_found": "Nie znaleziono urządzeń Shelly. Najpierw skonfiguruj integrację Shelly."
+    }
+  }
+}
