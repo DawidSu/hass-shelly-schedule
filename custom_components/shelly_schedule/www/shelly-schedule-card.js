@@ -631,7 +631,11 @@ class ShellyScheduleCard extends HTMLElement {
       }
       html += `</ul>`;
     } else if (!isUnavailable) {
-      html += `<div class="empty-state" style="padding:12px 16px;">${this._t("no_schedules")}</div>`;
+      html += `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;">
+          <span style="color:var(--secondary-text-color);font-size:0.95em;">${this._t("no_schedules")}</span>
+          ${!isGen1 ? `<button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>` : ""}
+        </div>`;
     }
 
     html += `</div>`;
@@ -1415,12 +1419,153 @@ class ShellyScheduleCardEditor extends HTMLElement {
 customElements.define("shelly-schedule-card-editor", ShellyScheduleCardEditor);
 customElements.define("shelly-schedule-card", ShellyScheduleCard);
 
+// ── Inline card: entity selector shown directly inside the card ───────────────
+
+class ShellyScheduleCardInline extends ShellyScheduleCard {
+  constructor() {
+    super();
+    this._selectedEntity = null;
+  }
+
+  static getConfigElement() {
+    return document.createElement("shelly-schedule-card-inline-editor");
+  }
+
+  static getStubConfig() {
+    return {};
+  }
+
+  _storageKey() {
+    return "shelly-schedule-inline:" + (this._config.storage_key || this._config.title || "default");
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    if (!this._selectedEntity) {
+      this._selectedEntity = localStorage.getItem(this._storageKey()) || null;
+    }
+    if (this._attached) this._render();
+  }
+
+  _render() {
+    const icon      = this._config.icon;
+    const color     = this._config.color || "var(--primary-color)";
+    const title     = this._config.title || this._t("default_title");
+    const hideTitle = !!this._config.hide_title;
+    this.shadowRoot.innerHTML = `
+      <style>${this._css()}</style>
+      <ha-card>
+        ${hideTitle ? "" : `
+        <div class="card-header">
+          <div class="title">
+            ${icon ? `<ha-icon class="icon" icon="${icon}" style="color:${color};"></ha-icon>` : ""}
+            <span>${title}</span>
+          </div>
+        </div>`}
+        <div class="device-selector">
+          <select id="inline-entity-select"></select>
+        </div>
+        <div id="card-body"></div>
+      </ha-card>
+    `;
+
+    const select = this.shadowRoot.getElementById("inline-entity-select");
+    select.addEventListener("change", e => {
+      this._selectedEntity = e.target.value || null;
+      if (this._selectedEntity) {
+        localStorage.setItem(this._storageKey(), this._selectedEntity);
+      } else {
+        localStorage.removeItem(this._storageKey());
+      }
+      this._updateContent();
+    });
+
+    const body = this.shadowRoot.getElementById("card-body");
+    this._bindEvents(body);
+    this._updateContent();
+  }
+
+  _populateEntitySelect() {
+    const select = this.shadowRoot.getElementById("inline-entity-select");
+    if (!select || !this._hass) return;
+    const entities = Object.keys(this._hass.states)
+      .filter(eid => eid.startsWith("sensor.shelly") && eid.endsWith("_schedule"))
+      .sort();
+    const current = this._selectedEntity || "";
+    select.innerHTML =
+      `<option value="">${this._t("pick_entity")}</option>` +
+      entities.map(eid => {
+        const rawName = this._hass.states[eid]?.attributes?.friendly_name || eid;
+        const name = rawName.replace(/\bshelly\b\s*/i, "").replace(/\s*schedule$/i, "").trim();
+        const entryReg = this._hass.entities?.[eid];
+        const areaId = entryReg?.area_id || this._hass.devices?.[entryReg?.device_id]?.area_id;
+        const area = areaId ? this._hass.areas?.[areaId]?.name : null;
+        const label = area ? `${name} · ${area}` : name;
+        return `<option value="${eid}" ${eid === current ? "selected" : ""}>${label}</option>`;
+      }).join("");
+  }
+
+  _updateContent() {
+    if (!this._selectedEntity) {
+      this._selectedEntity = localStorage.getItem(this._storageKey()) || null;
+    }
+    this._populateEntitySelect();
+
+    const body = this.shadowRoot.getElementById("card-body");
+    if (!body || !this._hass) return;
+
+    if (!this._selectedEntity) {
+      body.innerHTML = "";
+      return;
+    }
+
+    const state = this._hass.states[this._selectedEntity];
+    if (!state) {
+      body.innerHTML = `<div class="empty-state">${this._t("entity_not_found", `<b>${this._selectedEntity}</b>`)}</div>`;
+      return;
+    }
+
+    const isGen1 = this._selectedEntity.startsWith("sensor.shelly_gen1_");
+    const autoName = state.attributes?.friendly_name?.replace(" Schedule", "") || this._selectedEntity;
+    const dev = { entityId: this._selectedEntity, name: autoName, state };
+    body.innerHTML = this._renderDevice(dev, isGen1 ? "gen1" : "gen2");
+  }
+}
+
+// Editor for inline card — same as main editor but without entity selection
+class ShellyScheduleCardInlineEditor extends ShellyScheduleCardEditor {
+  _renderEditor() {
+    super._renderEditor();
+    const entityEl = this.querySelector("#ed-entity");
+    if (entityEl) {
+      const row = entityEl.closest(".ed-row");
+      const label = row?.previousElementSibling;
+      row?.remove();
+      label?.remove();
+    }
+  }
+
+  _updateEntitySelect() {
+    // no-op: entity selector lives inside the card, not in this editor
+  }
+}
+
+customElements.define("shelly-schedule-card-inline-editor", ShellyScheduleCardInlineEditor);
+customElements.define("shelly-schedule-card-inline", ShellyScheduleCardInline);
+
 // Register in HA card picker
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "shelly-schedule-card",
   name: "Shelly Schedule",
   description: "Manage Shelly device schedules (Gen1, Gen2, Gen3)",
+  preview: false,
+  documentationURL: "https://github.com/DawidSu/hass-shelly-schedule",
+});
+window.customCards.push({
+  type: "shelly-schedule-card-inline",
+  name: "Shelly Schedule (Inline)",
+  description: "Shelly schedules with entity selector directly in the card",
   preview: false,
   documentationURL: "https://github.com/DawidSu/hass-shelly-schedule",
 });
