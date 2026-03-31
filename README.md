@@ -18,7 +18,9 @@ Shelly-Geräte bieten eine eingebaute Zeitplanfunktion, mit der Aktionen (Ein/Au
 - Wochentag-Auswahl per Checkboxen (Mo Di Mi Do Fr Sa So)
 - Aktionsauswahl gefiltert nach Geräteprofil (Ein/Aus für Switches, Öffnen/Schließen/Stoppen/Position für Cover)
 - Web-UI-Link mit automatischem Passwort in die Zwischenablage
-- Native Lovelace-Karte (`shelly-schedule-card`) — keine Drittanbieter-Karten nötig
+- Zwei native Lovelace-Karten — keine Drittanbieter-Karten nötig:
+  - `shelly-schedule-card` — Entität per Editor konfiguriert
+  - `shelly-schedule-card-inline` — Entitätsauswahl direkt in der Karte
 - Periodische Aktualisierung alle 5 Minuten
 
 ## Voraussetzungen
@@ -62,13 +64,18 @@ Nach dem Neustart:
 - Für jedes Gerät wird ein Sensor `sensor.shelly_<name>_schedule` erstellt und dem jeweiligen Shelly-Gerät in der HA Device Registry zugeordnet
 - Das Geräteprofil (Switch/Cover) wird automatisch ermittelt
 
-## Lovelace-Karte
+## Lovelace-Karten
 
-Die Integration bringt eine eigene Lovelace-Karte mit. Karte hinzufügen:
+Die Integration bringt zwei eigene Lovelace-Karten mit. Karte hinzufügen:
 
 1. Dashboard bearbeiten → **+ Karte hinzufügen**
-2. Kartentyp **Shelly Schedule** auswählen (oder manuell `custom:shelly-schedule-card`)
-3. Im Editor die gewünschte Sensor-Entität auswählen
+2. Kartentyp auswählen (s. u.)
+
+---
+
+### Karte 1: `shelly-schedule-card`
+
+Klassische Variante — die Sensor-Entität wird einmalig im Editor konfiguriert.
 
 ```yaml
 type: custom:shelly-schedule-card
@@ -76,24 +83,51 @@ entity: sensor.shelly_wohnzimmer_licht_schedule
 title: Wohnzimmer Licht
 ```
 
-### Kartenoptionen
-
 | Option | Beschreibung | Standard |
 |--------|-------------|---------|
 | `entity` | Sensor-Entität (`sensor.shelly_*_schedule`) | — |
 | `title` | Kartentitel | `Shelly Schedules` |
 | `hide_title` | Kartentitel ausblenden | `false` |
 | `device_name` | Angezeigter Gerätename (überschreibt automatischen Namen) | — |
-| `icon` | Icon (z.B. `mdi:calendar-clock`) | `mdi:calendar-clock` |
-| `hide_icon` | Icon ausblenden | `false` |
+| `icon` | Icon (z.B. `mdi:calendar-clock`) | — |
 | `color` | Akzentfarbe (Hex) | HA Primärfarbe |
+| `device_icon` | Icon neben dem Gerätenamen | — |
+| `badge_mode` | Badge-Stil: `id` · `icon` · `none` | `id` |
+| `day_display` | Tagesanzeige: `text` · `chips` | `text` |
+| `hide_webui` | Web-UI-Link ausblenden | `false` |
+| `hide_action` | Aktion ausblenden | `false` |
+| `hide_run_button` | Ausführen-Button ausblenden | `false` |
 
-### Kartenansicht
+---
+
+### Karte 2: `shelly-schedule-card-inline`
+
+Inline-Variante — die Entitätsauswahl erscheint direkt in der Karte als Dropdown. Kein Editor-Entitätsfeld nötig. Die Auswahl wird im Browser gespeichert und bleibt nach einem Reload erhalten.
+
+```yaml
+type: custom:shelly-schedule-card-inline
+title: Shelly Schedules
+```
+
+Unterstützt dieselben Darstellungsoptionen wie `shelly-schedule-card` (außer `entity` und `device_name`).
+
+Optional: `storage_key` setzen, um mehrere Inline-Karten mit demselben Titel unabhängig voneinander zu halten:
+
+```yaml
+type: custom:shelly-schedule-card-inline
+title: Shelly Schedules
+storage_key: karte-wohnzimmer
+```
+
+---
+
+### Kartenansicht (beide Karten)
 
 - **Geräteheader** mit Anzahl der Aufgaben, **Web-UI**-Link (Passwort wird automatisch in die Zwischenablage kopiert) und **+ Neu**-Button
 - **Aufgabenliste** mit Uhrzeit bzw. Sonnenauf-/-untergang, Wochentagen, Aktion und Toggle-Switch zum Aktivieren/Deaktivieren
 - **Bearbeiten- und Löschen-Buttons** pro Aufgabe
 - **Erstellen/Bearbeiten-Dialog** mit Zeittyp (Uhrzeit / Sonnenaufgang / Sonnenuntergang), Offset, Wochentag-Checkboxen, Aktion und Aktiviert-Checkbox
+- Bei leerer Liste: **+ Neu**-Button direkt neben „Keine Zeitpläne"
 
 ## Verfügbare Services
 
