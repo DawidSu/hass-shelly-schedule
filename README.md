@@ -2,6 +2,8 @@
 
 Home Assistant Custom Integration zum Konfigurieren von Aufgaben (Zeitplänen) direkt auf Shelly-Geräten — ohne die Shelly-App, direkt aus der HA-Oberfläche.
 
+Wenn dir die Integration gefällt, freue ich mich über eine Spende: [![PayPal](https://img.shields.io/badge/PayPal-Spende-blue?logo=paypal)](https://www.paypal.com/paypalme/dawidSuchy)
+
 Unterstützt **Gen2/Gen3** (Digest-Auth, RPC-API) und **Gen1** (Basic-Auth) Geräte.
 
 ## Zweck
