@@ -1,5 +1,6 @@
 {
   "name": "Shelly Schedule",
   "homeassistant": "2024.4.0",
-  "render_readme": true
+  "render_readme": true,
+  "donate": "https://www.paypal.com/paypalme/dawidSuchy"
 }
