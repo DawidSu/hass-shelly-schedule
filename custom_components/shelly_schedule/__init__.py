@@ -615,7 +615,17 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
             existing = resources.async_items() if hasattr(resources, "async_items") else []
             for item in existing:
                 if _LOVELACE_URL in item.get("url", ""):
-                    _LOGGER.debug("Shelly Schedule card already registered (live)")
+                    if item.get("url") == _LOVELACE_RES_URL:
+                        _LOGGER.debug("Shelly Schedule card already registered (live, up to date)")
+                        return
+                    # URL veraltet — aktualisieren
+                    try:
+                        await resources.async_update_item(item["id"], {"res_type": "module", "url": _LOVELACE_RES_URL})
+                        _LOGGER.info("Updated Lovelace resource (live): %s", _LOVELACE_RES_URL)
+                    except Exception:
+                        await resources.async_delete_item(item["id"])
+                        await resources.async_create_item({"res_type": "module", "url": _LOVELACE_RES_URL})
+                        _LOGGER.info("Replaced Lovelace resource (live): %s", _LOVELACE_RES_URL)
                     return
             await resources.async_create_item({"res_type": "module", "url": _LOVELACE_RES_URL})
             _LOGGER.info("Registered Lovelace resource (live): %s", _LOVELACE_RES_URL)
@@ -631,7 +641,14 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
 
         for item in items:
             if _LOVELACE_URL in item.get("url", ""):
-                _LOGGER.debug("Shelly Schedule card already in storage")
+                if item.get("url") == _LOVELACE_RES_URL:
+                    _LOGGER.debug("Shelly Schedule card already in storage (up to date)")
+                    return
+                # URL veraltet — aktualisieren
+                item["url"] = _LOVELACE_RES_URL
+                data["items"] = items
+                await store.async_save(data)
+                _LOGGER.info("Updated Lovelace resource (storage): %s", _LOVELACE_RES_URL)
                 return
 
         items.append({"id": str(uuid.uuid4()), "type": "module", "url": _LOVELACE_RES_URL})
