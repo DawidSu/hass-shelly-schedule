@@ -651,12 +651,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coord = ShellyScheduleCoordinator(hass, entry)
     hass.data[DOMAIN][entry.entry_id] = coord
 
-    # Serve the Lovelace card JS and integration icon as static files
-    component_path = os.path.dirname(__file__)
-    www_path = os.path.join(component_path, "www")
+    # Serve the Lovelace card JS as a static file
+    www_path = os.path.join(os.path.dirname(__file__), "www")
     await hass.http.async_register_static_paths([
         StaticPathConfig("/shelly_schedule", www_path, False),
-        StaticPathConfig("/shelly_schedule_brand", component_path, False),
     ])
 
     # Set up all entity platforms
