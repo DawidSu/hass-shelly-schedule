@@ -43,7 +43,7 @@ const TRANSLATIONS = {
     task_singular:       "Aufgabe",
     task_plural:         "Aufgaben",
     btn_new:             "+ Neu",
-    no_schedules:        "Keine Zeitpläne",
+    no_schedules:        "Keine Aufgaben",
     sunrise:             "☀️ Sonnenaufgang",
     sunset:              "🌙 Sonnenuntergang",
     tooltip_disable:     "Deaktivieren",
@@ -332,6 +332,53 @@ function callIcon(c) {
   return "mdi:calendar-clock";
 }
 
+// ── Gen1 helpers ──────────────────────────────────────────────────────────────
+//
+// Gen1 rule format: "HHMM[modifier]-DAYS-ACTION"
+//   e.g. "0630-01234-on"  = 06:30, Mon-Fri, on
+//        "0010bss-0123456-on" = 10 min before sunset, all days, on
+//
+// Day digits: 0=Mon 1=Tue 2=Wed 3=Thu 4=Fri 5=Sat 6=Sun
+// Modifiers:  asr=after-sunrise  bsr=before-sunrise
+//             ass=after-sunset   bss=before-sunset
+
+const GEN1_NUM_TO_CRON = { "0":"MON","1":"TUE","2":"WED","3":"THU","4":"FRI","5":"SAT","6":"SUN" };
+const GEN1_CRON_TO_NUM = { MON:"0", TUE:"1", WED:"2", THU:"3", FRI:"4", SAT:"5", SUN:"6" };
+
+/** Parse Gen1 day string (e.g. "01234") → Set of cron keys */
+function parseGen1Days(dayStr) {
+  if (!dayStr || dayStr === "*") return new Set(DAY_ORDER);
+  return new Set([...dayStr].map(n => GEN1_NUM_TO_CRON[n]).filter(Boolean));
+}
+
+/** Convert array of cron-day keys back to sorted Gen1 digit string */
+function gen1DaysToSpec(cronDays) {
+  if (!cronDays || cronDays.length === 0 || cronDays.length === 7) return "0123456";
+  return [...cronDays].map(d => GEN1_CRON_TO_NUM[d]).filter(Boolean).sort().join("");
+}
+
+/** Parse a Gen1 rule string into components */
+function parseGen1Rule(rule) {
+  const parts = (rule || "").split("-");
+  const timePart  = parts[0] || "0700";
+  const daysPart  = parts[1] || "0123456";
+  const action    = parts[2] || "on";
+  // Extract optional sunrise/sunset modifier (asr, bsr, ass, bss)
+  const modMatch  = timePart.match(/([ab]s[sr])$/i);
+  const modifier  = modMatch ? modMatch[1].toLowerCase() : "";
+  const timeDigits = timePart.replace(/[^0-9]/g, "");
+  const hour      = timeDigits.slice(0, 2).padStart(2, "0");
+  const min       = timeDigits.slice(2, 4).padStart(2, "0");
+  return { hour, min, modifier, daysPart, action };
+}
+
+/** Build a Gen1 rule string from components */
+function buildGen1Rule(hour, minute, daySpec, action) {
+  const h = String(hour).padStart(2, "0");
+  const m = String(minute).padStart(2, "0");
+  return `${h}${m}-${daySpec}-${action}`;
+}
+
 class ShellyScheduleCard extends HTMLElement {
   constructor() {
     super();
@@ -615,26 +662,27 @@ class ShellyScheduleCard extends HTMLElement {
           <div style="display:flex;align-items:center;gap:8px;">
             ${this._config?.device_icon ? `<ha-icon icon="${this._config.device_icon}" style="--mdc-icon-size:18px;color:${this._config.color || "var(--primary-color)"};flex-shrink:0;"></ha-icon>` : ""}
             <span style="font-weight:600;font-size:0.95em;">${dev.name}</span>
+            ${(() => { const g = dev.state?.attributes?.gen; return g != null ? `<span style="font-size:0.7em;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--primary-color);color:var(--text-primary-color,#fff);opacity:0.75;">Gen${g}</span>` : ""; })()}
             ${webLink}
           </div>
           <div style="display:flex;gap:4px;align-items:center;">
             ${isUnavailable ? `<span style="font-size:0.75em;color:var(--error-color);">${this._t("unavailable")}</span>` : `<span style="font-size:0.75em;color:var(--secondary-text-color);">${taskCount}</span>`}
-            ${!isGen1 ? `<button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>` : ""}
+            <button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>
           </div>
         </div>
     `;
 
     if (!isUnavailable && jobs.length > 0) {
       html += `<ul class="schedule-list">`;
-      for (const job of jobs) {
-        html += isGen1 ? this._renderGen1Rule(job, dev) : this._renderGen2Job(job, dev);
-      }
+      jobs.forEach((job, idx) => {
+        html += isGen1 ? this._renderGen1Rule(job, idx, dev) : this._renderGen2Job(job, dev);
+      });
       html += `</ul>`;
     } else if (!isUnavailable) {
       html += `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;">
           <span style="color:var(--secondary-text-color);font-size:0.95em;">${this._t("no_schedules")}</span>
-          ${!isGen1 ? `<button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>` : ""}
+          <button class="btn btn-primary btn-add" data-entity="${dev.entityId}" style="padding:4px 8px;font-size:0.8em;">${this._t("btn_new")}</button>
         </div>`;
     }
 
@@ -692,23 +740,53 @@ class ShellyScheduleCard extends HTMLElement {
     `;
   }
 
-  _renderGen1Rule(rule, dev) {
-    // Gen1 rule format: "MM HH * * *=on"
-    const [cron, action] = (rule || "").split("=");
-    const parts = (cron || "").trim().split(" ");
-    const hour = (parts[1] || "?").padStart(2, "0");
-    const min = (parts[0] || "?").padStart(2, "0");
-    const gen1BadgeMode = this._config?.badge_mode ?? "id";
-    const gen1Badge = gen1BadgeMode === "none" ? "" :
-      gen1BadgeMode === "icon" ? `<ha-icon icon="${action === "on" ? "mdi:power" : "mdi:power-off"}"></ha-icon>` :
-      "·";
+  _renderGen1Rule(rule, idx, dev) {
+    // Gen1 rule format: "HHMM[modifier]-DAYS-ACTION"
+    const { hour, min, modifier, daysPart, action } = parseGen1Rule(rule);
     const actionLabel = action === "on" ? this._t("action_on") : this._t("action_off");
+
+    // Time display (same format as Gen2: "🌙 Sonnenuntergang -10min")
+    let timeDisplay;
+    if (modifier) {
+      const isSunrise = modifier === "asr" || modifier === "bsr";
+      const isBefore  = modifier === "bsr" || modifier === "bss";
+      const offsetMin = parseInt(hour, 10) * 60 + parseInt(min, 10);
+      const off       = isBefore ? -offsetMin : offsetMin;
+      const tKey      = isSunrise ? "sunrise" : "sunset";
+      timeDisplay = this._t(tKey) + (off > 0 ? ` +${off}min` : off < 0 ? ` ${off}min` : "");
+    } else {
+      timeDisplay = `${hour}:${min}`;
+    }
+
+    const badgeMode = this._config?.badge_mode ?? "id";
+    const badge = badgeMode === "none" ? "" :
+      badgeMode === "icon" ? `<ha-icon icon="${action === "on" ? "mdi:power" : "mdi:power-off"}"></ha-icon>` :
+      String(idx + 1);
+
+    // Day display
+    const activeSet = parseGen1Days(daysPart);
+    const allDays = DAY_ORDER.every(d => activeSet.has(d));
+    const daysHtml = this._config?.day_display === "chips"
+      ? `<div class="day-chips">${DAY_ORDER.map(d => `<span class="day-chip${activeSet.has(d) ? " active" : ""}">${this._t(DAY_SHORT_KEY_MAP[d])}</span>`).join("")}</div>`
+      : (allDays ? this._t("day_daily") : DAY_ORDER.filter(d => activeSet.has(d)).map(d => this._t(DAY_SHORT_KEY_MAP[d])).join(", "));
+
+    // Gen1 has no per-rule enable — toggle controls global scheduling for this device
+    const schedEnabled = dev.state?.attributes?.schedule !== false;
+    const jobData = JSON.stringify({ _gen1: true, idx, rule: rule || "" }).replace(/'/g, "&#39;");
     return `
       <li class="schedule-item" data-entity="${dev.entityId}">
-        ${gen1BadgeMode !== "none" ? `<div class="sched-id">${gen1Badge}</div>` : ""}
+        ${badgeMode !== "none" ? `<div class="sched-id">${badge}</div>` : ""}
         <div class="sched-info">
-          <div class="sched-time">${hour}:${min}</div>
-          <div class="sched-details">${this._config?.hide_action ? "" : actionLabel}</div>
+          <div class="sched-time">${timeDisplay}</div>
+          <div class="sched-details">${daysHtml}${this._config?.hide_action ? "" : " · " + actionLabel}</div>
+        </div>
+        <div class="sched-actions">
+          <button class="btn-icon btn-edit" title="${this._t("tooltip_edit")}" data-job='${jobData}' data-entity="${dev.entityId}">
+            <ha-icon icon="mdi:pencil"></ha-icon>
+          </button>
+          <button class="btn-icon btn-delete" title="${this._t("tooltip_delete")}" data-id="${idx}" data-gen1="true" data-entity="${dev.entityId}">
+            <ha-icon icon="mdi:delete"></ha-icon>
+          </button>
         </div>
       </li>
     `;
@@ -742,7 +820,7 @@ class ShellyScheduleCard extends HTMLElement {
         return;
       }
 
-      // Test action
+      // Test action (Gen2 only)
       const testBtn = e.target.closest(".btn-test");
       if (testBtn) {
         const deviceName = this._entityToDeviceName(testBtn.dataset.entity);
@@ -753,7 +831,7 @@ class ShellyScheduleCard extends HTMLElement {
         return;
       }
 
-      // Edit
+      // Edit (Gen1 + Gen2 unified)
       const editBtn = e.target.closest(".btn-edit");
       if (editBtn) {
         const entityId = editBtn.dataset.entity;
@@ -766,13 +844,23 @@ class ShellyScheduleCard extends HTMLElement {
         return;
       }
 
-      // Delete
+      // Delete (Gen1 + Gen2 unified)
       const delBtn = e.target.closest(".btn-delete");
       if (delBtn) {
-        const id = parseInt(delBtn.dataset.id);
-        const deviceName = this._entityToDeviceName(delBtn.dataset.entity);
-        if (confirm(this._t("confirm_delete", id))) {
-          this._callService("delete_schedule", { device: deviceName, schedule_id: id });
+        const entityId = delBtn.dataset.entity;
+        const deviceName = this._entityToDeviceName(entityId);
+        if (delBtn.dataset.gen1 === "true") {
+          const idx = parseInt(delBtn.dataset.id);
+          if (confirm(this._t("confirm_delete", idx + 1))) {
+            const rules = [...(this._hass?.states[entityId]?.attributes?.schedule_rules || [])];
+            rules.splice(idx, 1);
+            this._callService("gen1_save_rules", { device: deviceName, rules });
+          }
+        } else {
+          const id = parseInt(delBtn.dataset.id);
+          if (confirm(this._t("confirm_delete", id))) {
+            this._callService("delete_schedule", { device: deviceName, schedule_id: id });
+          }
         }
         return;
       }
@@ -782,64 +870,105 @@ class ShellyScheduleCard extends HTMLElement {
     body.addEventListener("change", e => {
       const input = e.target.closest(".btn-toggle");
       if (!input) return;
-      const id = parseInt(input.dataset.id);
-      const deviceName = this._entityToDeviceName(input.dataset.entity);
-      this._callService(input.checked ? "enable_schedule" : "disable_schedule", {
-        device: deviceName,
-        schedule_id: id,
-      });
+      const entityId = input.dataset.entity;
+      const deviceName = this._entityToDeviceName(entityId);
+      if (input.dataset.gen1 === "true") {
+        // Gen1: toggle controls global scheduling for the device
+        this._callService(input.checked ? "gen1_enable_scheduling" : "gen1_disable_scheduling", {});
+        this._hass?.callService("input_select", "select_option", {
+          entity_id: "input_select.shelly_gen1_geraet",
+          option: deviceName,
+        }).catch(() => {});
+      } else {
+        // Gen2: toggle controls individual schedule
+        this._callService(input.checked ? "enable_schedule" : "disable_schedule", {
+          device: deviceName,
+          schedule_id: parseInt(input.dataset.id),
+        });
+      }
     });
   }
 
   // ── Modal ─────────────────────────────────────────────────────────────────
 
   _openModal(job, dev) {
-    this._editJob = job;
+    // Detect Gen1: job may be null (new) or { _gen1, idx, rule } (edit)
+    const isGen1 = dev.entityId.startsWith("sensor.shelly_gen1_");
+    const isEdit = job !== null && job !== undefined;
 
-    const isEdit  = job !== null;
-    const parsed  = isEdit ? parseCron(job.timespec) : { timeType: "time", time: "07:00", days: "Täglich", offset: 0 };
-    const timeType = parsed.timeType || "time";
-    const time     = parsed.time || "07:00";
-    const days     = parsed.days || "Täglich";
-    const sunOffset = parsed.offset || 0;
-    const profile = this._hass?.states[dev.entityId]?.attributes?.device_profile
-      || this._getDeviceProfileFromHass(dev.entityId);
-    const isCover = profile === "cover";
+    // ── Parse initial field values ──────────────────────────────────────────
+    let timeType, time, sunOffset, days, checkedSet, action, enabled, pos, gen1Idx;
 
-    const action = isEdit && job.calls?.length
-      ? callPart(job.calls[0]).split(" ")[0]
-      : (isCover ? "Öffnen" : "Einschalten");
-    const enabled = isEdit ? (job.enable !== false) : true;
-    const pos = isEdit && job.calls?.[0]?.params?.pos != null ? job.calls[0].params.pos : 50;
+    if (isGen1) {
+      enabled = true;
+      pos     = 50;
+      days    = "Täglich";
+      if (isEdit) {
+        gen1Idx = job.idx;
+        const p = parseGen1Rule(job.rule);
+        action    = p.action === "off" ? "Ausschalten" : "Einschalten";
+        checkedSet = parseGen1Days(p.daysPart);
+        if (p.modifier) {
+          // sunrise/sunset rule: modifier = asr/bsr/ass/bss
+          const isBefore = p.modifier[0] === "b";
+          timeType  = p.modifier.endsWith("r") ? "sunrise" : "sunset";
+          const offsetMins = parseInt(p.hour) * 60 + parseInt(p.min);
+          sunOffset = isBefore ? -offsetMins : offsetMins;
+          time      = "00:00";
+        } else {
+          timeType  = "time";
+          sunOffset = 0;
+          time      = `${p.hour}:${p.min}`;
+        }
+      } else {
+        gen1Idx    = -1;
+        timeType   = "time";
+        sunOffset  = 0;
+        time       = "07:00";
+        action     = "Einschalten";
+        checkedSet = new Set(DAY_ORDER);
+      }
+    } else {
+      this._editJob = job;
+      const parsed = isEdit ? parseCron(job.timespec) : { timeType: "time", time: "07:00", days: "Täglich", offset: 0 };
+      timeType  = parsed.timeType || "time";
+      time      = parsed.time || "07:00";
+      days      = parsed.days || "Täglich";
+      sunOffset = parsed.offset || 0;
+      action    = isEdit && job.calls?.length ? callPart(job.calls[0]).split(" ")[0] : null;
+      enabled   = isEdit ? (job.enable !== false) : true;
+      pos       = isEdit && job.calls?.[0]?.params?.pos != null ? job.calls[0].params.pos : 50;
 
-    const availableActions = isCover
-      ? ["Öffnen", "Schließen", "Stoppen", "Position"]
-      : ["Einschalten", "Ausschalten"];
+      const ALL_CRON = new Set(DAY_ORDER);
+      function daysToSet(daysVal) {
+        const mapped = DAYS_MAP[daysVal];
+        if (mapped === "*" || mapped == null && (daysVal === "Täglich" || !daysVal)) return new Set(ALL_CRON);
+        if (mapped) return new Set(mapped.split(",").map(d => d.trim().toUpperCase()));
+        const parts = daysVal.split(",").map(d => d.trim().toUpperCase()).filter(d => ALL_CRON.has(d));
+        return parts.length > 0 ? new Set(parts) : new Set(ALL_CRON);
+      }
+      checkedSet = daysToSet(days);
 
-    // Time type options with translated labels; value stays as internal key
-    const timeTypeOpts = [
-      ["time",    this._t("modal_timetype_time")],
-      ["sunrise", this._t("modal_timetype_sun")],
-      ["sunset",  this._t("modal_timetype_set")],
-    ].map(([v, l]) => `<option value="${v}" ${v === timeType ? "selected" : ""}>${l}</option>`).join("");
+      const profile = this._hass?.states[dev.entityId]?.attributes?.device_profile
+        || this._getDeviceProfileFromHass(dev.entityId);
+      const isCover = profile === "cover";
+      if (!action) action = isCover ? "Öffnen" : "Einschalten";
+    }
 
-    // Convert parsed days label / raw cron string → Set of cron day codes
+    // ── Build field HTML ────────────────────────────────────────────────────
+    const profile2 = isGen1 ? "switch"
+      : (this._hass?.states[dev.entityId]?.attributes?.device_profile || this._getDeviceProfileFromHass(dev.entityId));
+    const isCover = !isGen1 && profile2 === "cover";
+    const availableActions = isGen1
+      ? ["Einschalten", "Ausschalten"]
+      : (isCover ? ["Öffnen", "Schließen", "Stoppen", "Position"] : ["Einschalten", "Ausschalten"]);
+
     const WDAYS = [
       { labelKey: "day_short_mon", cron: "MON" }, { labelKey: "day_short_tue", cron: "TUE" },
       { labelKey: "day_short_wed", cron: "WED" }, { labelKey: "day_short_thu", cron: "THU" },
       { labelKey: "day_short_fri", cron: "FRI" }, { labelKey: "day_short_sat", cron: "SAT" },
       { labelKey: "day_short_sun", cron: "SUN" },
     ];
-    const ALL_CRON = new Set(WDAYS.map(d => d.cron));
-    function daysToSet(daysVal) {
-      const mapped = DAYS_MAP[daysVal]; // e.g. "*", "MON,TUE,WED,THU,FRI"
-      if (mapped === "*" || mapped == null && (daysVal === "Täglich" || !daysVal)) return new Set(ALL_CRON);
-      if (mapped) return new Set(mapped.split(",").map(d => d.trim().toUpperCase()));
-      // Raw cron string fallback (e.g. "SUN,SAT" when DAYS_MAP had no match)
-      const parts = daysVal.split(",").map(d => d.trim().toUpperCase()).filter(d => ALL_CRON.has(d));
-      return parts.length > 0 ? new Set(parts) : new Set(ALL_CRON);
-    }
-    const checkedSet = daysToSet(days);
     const dayCheckboxes = WDAYS.map(d =>
       `<label style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-size:0.82em;user-select:none;">
         <input type="checkbox" class="m-day-cb" data-cron="${d.cron}" ${checkedSet.has(d.cron) ? "checked" : ""} style="cursor:pointer;width:16px;height:16px;accent-color:var(--primary-color);">
@@ -847,10 +976,16 @@ class ShellyScheduleCard extends HTMLElement {
       </label>`
     ).join("");
 
-    // Action options: value=internal German key, display=translated label
     const actionOpts = availableActions.map(a =>
       `<option value="${a}" ${a === action ? "selected" : ""}>${this._t(ACTION_KEY_MAP[a] || a)}</option>`
     ).join("");
+
+    const isSun = timeType === "sunrise" || timeType === "sunset";
+    const timeTypeOpts = [
+      ["time",    this._t("modal_timetype_time")],
+      ["sunrise", this._t("modal_timetype_sun")],
+      ["sunset",  this._t("modal_timetype_set")],
+    ].map(([v, l]) => `<option value="${v}" ${v === timeType ? "selected" : ""}>${l}</option>`).join("");
 
     const S = {
       backdrop: `position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;`,
@@ -865,7 +1000,6 @@ class ShellyScheduleCard extends HTMLElement {
       toggle:   `display:flex;align-items:center;gap:8px;font-size:0.9em;margin-bottom:4px;`,
     };
 
-    const isSun = timeType === "sunrise" || timeType === "sunset";
     const backdrop = document.createElement("div");
     backdrop.style.cssText = S.backdrop;
     backdrop.innerHTML = `
@@ -881,9 +1015,9 @@ class ShellyScheduleCard extends HTMLElement {
         </div>
         <div id="m-sun-row" style="${S.row}display:${isSun ? "block" : "none"}">
           <label style="${S.label}">${this._t("modal_offset")}</label>
-          <input type="number" id="m-offset" min="-120" max="120" step="5" value="${sunOffset}" style="${S.field}">
+          <input type="number" id="m-offset" min="-360" max="360" step="5" value="${sunOffset}" style="${S.field}">
         </div>
-        <div id="m-days-row" style="${S.row}display:block">
+        <div style="${S.row}">
           <label style="${S.label}">${this._t("modal_days")}</label>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">${dayCheckboxes}</div>
         </div>
@@ -891,6 +1025,7 @@ class ShellyScheduleCard extends HTMLElement {
           <label style="${S.label}">${this._t("modal_action")}</label>
           <select id="m-action" style="${S.field}">${actionOpts}</select>
         </div>
+        ${!isGen1 ? `
         <div id="pos-row" style="${S.row}display:${action === "Position" ? "block" : "none"}">
           <label style="${S.label}">${this._t("modal_position")}</label>
           <input type="number" id="m-pos" min="0" max="100" value="${pos}" style="${S.field}">
@@ -898,7 +1033,7 @@ class ShellyScheduleCard extends HTMLElement {
         <div style="${S.toggle}">
           <input type="checkbox" id="m-enabled" ${enabled ? "checked" : ""}>
           <label for="m-enabled">${this._t("modal_enabled")}</label>
-        </div>
+        </div>` : ""}
         <div style="${S.actions}">
           <button id="m-cancel" style="${S.btnSec}">${this._t("modal_cancel")}</button>
           <button id="m-save"   style="${S.btnPri}">${isEdit ? this._t("modal_save") : this._t("modal_create")}</button>
@@ -906,67 +1041,82 @@ class ShellyScheduleCard extends HTMLElement {
       </div>
     `;
 
-    // Show/hide fields based on time type
+    // Show/hide time vs offset row based on time type (both Gen1 + Gen2)
     backdrop.querySelector("#m-timetype").addEventListener("change", e => {
       const sun = e.target.value === "sunrise" || e.target.value === "sunset";
       backdrop.querySelector("#m-time-row").style.display = sun ? "none" : "block";
       backdrop.querySelector("#m-sun-row").style.display  = sun ? "block" : "none";
     });
+    // Gen2 only: position field
+    if (!isGen1) {
+      backdrop.querySelector("#m-action").addEventListener("change", e => {
+        backdrop.querySelector("#pos-row").style.display = e.target.value === "Position" ? "block" : "none";
+      });
+    }
 
-    // Show/hide position field
-    backdrop.querySelector("#m-action").addEventListener("change", e => {
-      backdrop.querySelector("#pos-row").style.display =
-        e.target.value === "Position" ? "block" : "none";
-    });
-
-    backdrop.querySelector("#m-cancel").addEventListener("click", () => {
-      backdrop.remove();
-    });
-    backdrop.addEventListener("click", e => {
-      if (e.target === backdrop) backdrop.remove();
-    });
+    backdrop.querySelector("#m-cancel").addEventListener("click", () => backdrop.remove());
+    backdrop.addEventListener("click", e => { if (e.target === backdrop) backdrop.remove(); });
 
     backdrop.querySelector("#m-save").addEventListener("click", () => {
-      const typeVal    = backdrop.querySelector("#m-timetype").value;
-      const timeVal    = backdrop.querySelector("#m-time").value;
-      const offsetVal  = parseInt(backdrop.querySelector("#m-offset").value) || 0;
-      const checked    = [...backdrop.querySelectorAll(".m-day-cb:checked")].map(cb => cb.dataset.cron);
-      const daySpec    = (checked.length === 0 || checked.length === 7) ? "*" : checked.join(",");
-      const actionVal  = backdrop.querySelector("#m-action").value;
-      const posVal     = parseInt(backdrop.querySelector("#m-pos").value) || 50;
-      const enabledVal = backdrop.querySelector("#m-enabled").checked;
+      const timeVal   = backdrop.querySelector("#m-time").value;
+      const checked   = [...backdrop.querySelectorAll(".m-day-cb:checked")].map(cb => cb.dataset.cron);
+      const actionVal = backdrop.querySelector("#m-action").value;
       const deviceName = this._entityToDeviceName(dev.entityId);
 
-      let timespec;
-      if (typeVal === "sunrise" || typeVal === "sunset") {
-        // Use Shelly's native format: @sunset-0h10m * * <days>
-        const absMin  = Math.abs(offsetVal);
-        const h       = Math.floor(absMin / 60);
-        const m       = absMin % 60;
-        const sign   = offsetVal < 0 ? "-" : "+";
-        const offStr = offsetVal !== 0 ? `${sign}${h}h${m}m` : "";
-        timespec = `@${typeVal}${offStr} * * ${daySpec}`;
+      if (isGen1) {
+        // ── Gen1 save ──────────────────────────────────────────────────────
+        const typeVal   = backdrop.querySelector("#m-timetype").value;
+        const offsetVal = parseInt(backdrop.querySelector("#m-offset").value) || 0;
+        const dow       = gen1DaysToSpec(checked);
+        const act       = actionVal === "Ausschalten" ? "off" : "on";
+        let newRule;
+        if (typeVal === "sunrise" || typeVal === "sunset") {
+          const absMin   = Math.abs(offsetVal);
+          const hh       = String(Math.floor(absMin / 60)).padStart(2, "0");
+          const mm       = String(absMin % 60).padStart(2, "0");
+          const dir      = offsetVal < 0 ? "b" : "a";
+          const evt      = typeVal === "sunrise" ? "sr" : "ss";
+          newRule = `${hh}${mm}${dir}${evt}-${dow}-${act}`;
+        } else {
+          const [h, m] = (timeVal || "07:00").split(":").map(Number);
+          newRule = buildGen1Rule(h, m, dow, act);
+        }
+        const allRules = [...(this._hass?.states[dev.entityId]?.attributes?.schedule_rules || [])];
+        if (isEdit) { allRules[gen1Idx] = newRule; } else { allRules.push(newRule); }
+        this._callService("gen1_save_rules", { device: deviceName, rules: allRules });
       } else {
-        const [h, m] = (timeVal || "07:00").split(":").map(Number);
-        timespec = `0 ${m} ${h} * * ${daySpec}`;
+        // ── Gen2 save ──────────────────────────────────────────────────────
+        const typeVal    = backdrop.querySelector("#m-timetype").value;
+        const offsetVal  = parseInt(backdrop.querySelector("#m-offset").value) || 0;
+        const daySpec    = (checked.length === 0 || checked.length === 7) ? "*" : checked.join(",");
+        const posVal     = parseInt(backdrop.querySelector("#m-pos").value) || 50;
+        const enabledVal = backdrop.querySelector("#m-enabled").checked;
+
+        let timespec;
+        if (typeVal === "sunrise" || typeVal === "sunset") {
+          const absMin = Math.abs(offsetVal);
+          const offStr = offsetVal !== 0 ? `${offsetVal < 0 ? "-" : "+"}${Math.floor(absMin/60)}h${absMin%60}m` : "";
+          timespec = `@${typeVal}${offStr} * * ${daySpec}`;
+        } else {
+          const [h, m] = (timeVal || "07:00").split(":").map(Number);
+          timespec = `0 ${m} ${h} * * ${daySpec}`;
+        }
+
+        let calls;
+        if (actionVal === "Einschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: true } }];
+        else if (actionVal === "Ausschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: false } }];
+        else if (actionVal === "Öffnen") calls = [{ method: "Cover.Open", params: { id: 0 } }];
+        else if (actionVal === "Schließen") calls = [{ method: "Cover.Close", params: { id: 0 } }];
+        else if (actionVal === "Stoppen") calls = [{ method: "Cover.Stop", params: { id: 0 } }];
+        else calls = [{ method: "Cover.GoToPosition", params: { id: 0, pos: posVal } }];
+
+        const data = { device: deviceName, timespec, enable: enabledVal, calls };
+        if (isEdit) data.schedule_id = job.id;
+        this._callService(isEdit ? "replace_schedule" : "create_schedule", data);
       }
-
-      let calls;
-      if (actionVal === "Einschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: true } }];
-      else if (actionVal === "Ausschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: false } }];
-      else if (actionVal === "Öffnen") calls = [{ method: "Cover.Open", params: { id: 0 } }];
-      else if (actionVal === "Schließen") calls = [{ method: "Cover.Close", params: { id: 0 } }];
-      else if (actionVal === "Stoppen") calls = [{ method: "Cover.Stop", params: { id: 0 } }];
-      else calls = [{ method: "Cover.GoToPosition", params: { id: 0, pos: posVal } }];
-
-      const data = { device: deviceName, timespec, enable: enabledVal, calls };
-      if (isEdit) data.schedule_id = job.id;
-
-      this._callService(isEdit ? "replace_schedule" : "create_schedule", data);
       backdrop.remove();
     });
 
-    // Attach to document body so it overlays everything
     document.body.appendChild(backdrop);
   }
 
@@ -1025,7 +1175,11 @@ class ShellyScheduleCard extends HTMLElement {
 
   _callService(service, data = {}) {
     if (!this._hass) return;
-    this._hass.callService("shelly_schedule", service, data).catch(err => {
+    this._hass.callService("shelly_schedule", service, data).then(() => {
+      // WebSocket state-change events arrive after the service promise resolves.
+      // Schedule a refresh so the UI reflects the new state without waiting for the next hass cycle.
+      setTimeout(() => this._updateContent(), 800);
+    }).catch(err => {
       console.error("shelly_schedule." + service, err);
     });
   }
@@ -1491,6 +1645,10 @@ class ShellyScheduleCardInline extends ShellyScheduleCard {
     const entities = Object.keys(this._hass.states)
       .filter(eid => eid.startsWith("sensor.shelly") && eid.endsWith("_schedule"))
       .sort();
+    // Only rebuild if entity list changed — avoids resetting select.value on every hass update
+    const key = entities.join(",");
+    if (this._entityListKey === key) return;
+    this._entityListKey = key;
     const current = this._selectedEntity || "";
     select.innerHTML =
       `<option value="">${this._t("pick_entity")}</option>` +

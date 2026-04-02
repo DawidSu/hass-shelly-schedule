@@ -103,6 +103,7 @@ class ShellyScheduleSensor(SensorEntity):
         attrs: dict = {
             "hostname": self._hostname,
             "device_name": self._device_name,
+            "gen": self._gen,
         }
         if self._gen >= 2:
             attrs.update({

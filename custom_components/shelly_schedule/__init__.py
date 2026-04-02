@@ -91,12 +91,39 @@ def _gen1_http_get_sync(hostname: str, path: str, user: str, password: str) -> d
 
 
 def _gen1_http_post_form_sync(
-    hostname: str, path: str, params: dict, user: str, password: str
+    hostname: str, path: str, params, user: str, password: str
 ) -> bytes | None:
-    """Synchronous POST with form data to Shelly Gen1 endpoint (Basic-Auth)."""
+    """Synchronous POST with form data to Shelly Gen1 endpoint (Basic-Auth).
+    params may be a dict or a list of (key, value) tuples for repeated keys."""
     try:
         url = f"http://{hostname}/{path}"
         resp = requests.post(url, data=params, auth=HTTPBasicAuth(user, password), timeout=10)
+        resp.raise_for_status()
+        return resp.content
+    except Exception as exc:
+        _LOGGER.error("Shelly Gen1 POST error %s/%s: %s", hostname, path, exc)
+        return None
+
+
+def _gen1_http_post_raw_sync(
+    hostname: str, path: str, body: str, user: str, password: str
+) -> bytes | None:
+    """Synchronous POST with a pre-built body string to Shelly Gen1 endpoint.
+
+    Unlike _gen1_http_post_form_sync (which uses requests' built-in form encoding),
+    this function sends `body` verbatim so that bracket characters like `[]` are NOT
+    percent-encoded.  Shelly Gen1 firmware requires literal `schedule_rules[]` keys;
+    the percent-encoded form `schedule_rules%5B%5D` is silently ignored.
+    """
+    try:
+        url = f"http://{hostname}/{path}"
+        resp = requests.post(
+            url,
+            data=body.encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            auth=HTTPBasicAuth(user, password),
+            timeout=10,
+        )
         resp.raise_for_status()
         return resp.content
     except Exception as exc:
@@ -306,7 +333,7 @@ class ShellyScheduleCoordinator:
             sensor = self._sensors.get(name)
             user, password = self._get_credentials(name, 1)
             data = await self.hass.async_add_executor_job(
-                _gen1_http_get_sync, hostname, "settings", user, password
+                _gen1_http_get_sync, hostname, "settings/relay/0", user, password
             )
             if data is not None:
                 rules = data.get("schedule_rules", [])
@@ -522,16 +549,14 @@ async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: Service
     zeit = coord.time_entity._attr_native_value
     stunde = zeit.hour
     minute = zeit.minute
-    timespec = f"{minute} {stunde} * * *"
-
     action = "on" if (coord.gen1_switch is not None and coord.gen1_switch._attr_is_on) else "off"
-    regel = f"{timespec}={action}"
+    regel = f"{stunde:02d}{minute:02d}-0123456-{action}"
 
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
         _gen1_http_post_form_sync,
         hostname,
-        "settings",
+        "settings/relay/0",
         {"schedule": "true", "schedule_rules[0]": regel},
         user,
         password,
@@ -548,7 +573,7 @@ async def _svc_gen1_delete_schedule(coord: ShellyScheduleCoordinator, call: Serv
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
-        _gen1_http_get_sync, hostname, "settings?schedule=false", user, password
+        _gen1_http_get_sync, hostname, "settings/relay/0?schedule=false", user, password
     )
     if result is not None:
         await coord.update_sensors()
@@ -561,7 +586,7 @@ async def _svc_gen1_enable_scheduling(coord: ShellyScheduleCoordinator, call: Se
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
-        _gen1_http_get_sync, hostname, "settings?schedule=true", user, password
+        _gen1_http_get_sync, hostname, "settings/relay/0?schedule=true", user, password
     )
     if result is not None:
         await coord.update_sensors()
@@ -574,10 +599,53 @@ async def _svc_gen1_disable_scheduling(coord: ShellyScheduleCoordinator, call: S
         return
     user, password = coord._get_credentials(geraet_name, 1)
     result = await coord.hass.async_add_executor_job(
-        _gen1_http_get_sync, hostname, "settings?schedule=false", user, password
+        _gen1_http_get_sync, hostname, "settings/relay/0?schedule=false", user, password
     )
     if result is not None:
         await coord.update_sensors()
+
+
+async def _svc_gen1_save_rules(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
+    """Service: replace all schedule rules on a Gen1 device.
+
+    Parameters
+    ----------
+    device : str   – device name as shown in HA (e.g. "Shelly Plug S")
+    rules  : list  – list of rule strings like "30 7 * * 1,2,3,4,5=on"
+                     (empty list → disable scheduling and clear all rules)
+    """
+    device_name = call.data.get("device")
+    rules: list[str] = list(call.data.get("rules", []))
+
+    if not device_name:
+        _LOGGER.error("gen1_save_rules: missing 'device' parameter")
+        return
+
+    hostname = coord.gen1_device_map.get(device_name)
+    if not hostname:
+        _LOGGER.error("gen1_save_rules: unknown Gen1 device '%s'", device_name)
+        return
+
+    user, password = coord._get_credentials(device_name, 1)
+
+    if not rules:
+        await coord.hass.async_add_executor_job(
+            _gen1_http_get_sync, hostname, "settings/relay/0?schedule=false", user, password
+        )
+    else:
+        # Shelly Gen1 firmware (SHPLG-S v1.14.1) only processes the FIRST entry when
+        # schedule_rules[] or schedule_rules[n] keys are repeated — even with literal brackets.
+        # The workaround is to pass all rules as a single comma-separated value:
+        #   schedule_rules=rule1%2Crule2%2Crule3
+        # The firmware splits on commas and stores all rules correctly.
+        from urllib.parse import quote
+        rules_csv = quote(",".join(rules), safe="")
+        body = f"schedule=1&schedule_rules={rules_csv}"
+        _LOGGER.debug("gen1_save_rules body: %s", body)
+        await coord.hass.async_add_executor_job(
+            _gen1_http_post_raw_sync, hostname, "settings/relay/0", body, user, password
+        )
+    await coord.update_sensors()
 
 
 # ── Integration setup ─────────────────────────────────────────────────────────
@@ -690,6 +758,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "gen1_enable_scheduling", partial(_svc_gen1_enable_scheduling, coord))
     hass.services.async_register(DOMAIN, "gen1_disable_scheduling", partial(_svc_gen1_disable_scheduling, coord))
     hass.services.async_register(DOMAIN, "run_action",             partial(_svc_run_action,             coord))
+    hass.services.async_register(DOMAIN, "gen1_save_rules",       partial(_svc_gen1_save_rules,        coord))
 
     # Delayed startup: wait for Shelly integration to finish loading
     async def _startup(delay: int = 20):
