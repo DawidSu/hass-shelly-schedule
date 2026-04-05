@@ -5,7 +5,7 @@
   "no_entity":           "Por favor seleccione una entidad en <b>Editar</b>.",
   "entity_not_found":    "Entidad {0} no encontrada.",
   "section_gen1":        "Dispositivos Gen1",
-  "section_gen2":        "Dispositivos Gen2/Gen3",
+  "section_gen2":        "Dispositivos Gen2/Gen3/Gen4",
   "webui_btn":           "Web-UI",
   "webui_title":         "Abrir Web-UI",
   "unavailable":         "No disponible",

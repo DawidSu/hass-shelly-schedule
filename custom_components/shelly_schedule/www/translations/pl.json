@@ -5,7 +5,7 @@
   "no_entity":           "Wybierz encję w <b>Edytuj</b>.",
   "entity_not_found":    "Encja {0} nie znaleziona.",
   "section_gen1":        "Urządzenia Gen1",
-  "section_gen2":        "Urządzenia Gen2/Gen3",
+  "section_gen2":        "Urządzenia Gen2/Gen3/Gen4",
   "webui_btn":           "Web-UI",
   "webui_title":         "Otwórz Web-UI",
   "unavailable":         "Niedostępne",

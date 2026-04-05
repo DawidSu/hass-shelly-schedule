@@ -132,13 +132,19 @@ def _gen1_http_post_raw_sync(
 
 
 def _find_device_identifiers(hass, device_reg, name: str):
-    """Find HA device identifiers for a Shelly device by display name."""
+    """Find HA device identifiers for a Shelly device by display name.
+
+    Matches against name_by_user, dev.name, and entry.title so that both
+    preferred and canonical names (used after collision resolution) work.
+    """
     dev_id = None
+    shelly_entries = hass.config_entries.async_entries("shelly")
     for dev in device_reg.devices.values():
-        for entry in hass.config_entries.async_entries("shelly"):
-            if entry.entry_id in dev.config_entries and (dev.name_by_user or dev.name) == name:
-                dev_id = dev.id
-                break
+        for entry in shelly_entries:
+            if entry.entry_id in dev.config_entries:
+                if name in (dev.name_by_user, dev.name, entry.title):
+                    dev_id = dev.id
+                    break
         if dev_id:
             break
     dev_entry = device_reg.async_get(dev_id) if dev_id else None
@@ -155,15 +161,17 @@ class ShellyScheduleCoordinator:
         self.hass = hass
         self.entry = entry
 
-        # device maps: { display_name: hostname }
-        self.device_map: dict[str, str] = {}
-        self.gen1_device_map: dict[str, str] = {}
-        # credentials from Shelly integration: { display_name: (user, password) }
-        self._shelly_creds: dict[str, tuple[str, str]] = {}
-        # device profiles: { display_name: "switch" | "cover" }
-        self._device_profiles: dict[str, str] = {}
-        # Sensor entities: { device_name: ShellyScheduleSensor }
-        self._sensors: dict[str, "ShellyScheduleSensor"] = {}
+        # Primary maps — keyed by sensor entity_id (e.g. "sensor.shelly_schedule_aabbcc112233")
+        # entity_ids are MAC-based and therefore guaranteed unique by HA.
+        self.device_map: dict[str, str] = {}        # entity_id → hostname  (Gen2/Gen3)
+        self.gen1_device_map: dict[str, str] = {}   # entity_id → hostname  (Gen1)
+        self._device_profiles: dict[str, str] = {}  # entity_id → "switch"|"cover"
+        self._shelly_creds: dict[str, tuple[str, str]] = {}  # entity_id → (user, pw)
+        self._display_names: dict[str, str] = {}    # entity_id → human-readable name
+        self._sensors: dict[str, "ShellyScheduleSensor"] = {}  # entity_id → sensor
+
+        # Reverse lookup for backwards-compat (old `device` param in service calls)
+        self._entity_by_name: dict[str, str] = {}   # display_name → entity_id
         # Callback set by sensor platform to add new entities dynamically
         self.async_add_sensor_entities = None
 
@@ -177,29 +185,37 @@ class ShellyScheduleCoordinator:
         self.time_entity = None
         self.gen1_switch = None
 
-    def _get_credentials(self, name: str, gen: int) -> tuple[str, str]:
-        """Return (user, password) for a device.
+    def _get_credentials(self, entity_id: str, gen: int) -> tuple[str, str]:
+        """Return (user, password) for a device identified by sensor entity_id.
 
-        Priority: per-device options override → Shelly integration config entry → empty fallback.
+        Priority: per-device options override → Shelly integration config entry → empty.
+        Also accepts a legacy display_name via _entity_by_name reverse lookup.
         """
-        # 1. Per-device override from options flow
+        # Normalise: accept either entity_id or display_name (backwards compat)
+        key = entity_id if entity_id in self._shelly_creds else self._entity_by_name.get(entity_id, entity_id)
+
         device_creds = self.entry.options.get(CONF_DEVICE_CREDENTIALS, {})
-        override = device_creds.get(name, {})
+        override = device_creds.get(key, {})
 
         if gen >= 2:
             password = (
                 override.get(CONF_GEN2_PASSWORD)
-                or self._shelly_creds.get(name, ("admin", ""))[1]
+                or self._shelly_creds.get(key, ("admin", ""))[1]
             )
             return ("admin", password)
         else:
-            shelly_user, shelly_pw = self._shelly_creds.get(name, ("admin", ""))
+            shelly_user, shelly_pw = self._shelly_creds.get(key, ("admin", ""))
             user = override.get(CONF_GEN1_USERNAME) or shelly_user
             password = override.get(CONF_GEN1_PASSWORD) or shelly_pw
             return (user, password)
 
     async def load_devices(self) -> None:
-        """Discover Shelly devices from config entries and device registry."""
+        """Discover Shelly devices from config entries and device registry.
+
+        Sensor entity_id is derived from the canonical device name (dev.name, not
+        name_by_user) so renames don't cause collisions.  unique_id is MAC-based
+        so HA entity registry keeps entities stable across renames.
+        """
         try:
             from homeassistant.helpers import device_registry as dr
             from homeassistant.helpers import entity_registry as er
@@ -212,6 +228,13 @@ class ShellyScheduleCoordinator:
             new_gen2: dict[str, str] = {}
             new_gen1: dict[str, str] = {}
             new_creds: dict[str, tuple[str, str]] = {}
+            new_profiles: dict[str, str] = {}
+            new_names: dict[str, str] = {}
+            new_entity_by_name: dict[str, str] = {}
+            # entity_id → device identifiers (for sensor → device linkage)
+            new_identifiers: dict[str, set] = {}
+            new_unique_ids: dict[str, str] = {}
+            new_gens: dict[str, int] = {}
 
             for entry in entries:
                 host = entry.data.get("host", "")
@@ -219,25 +242,40 @@ class ShellyScheduleCoordinator:
                 if not host:
                     continue
 
-                name = entry.title
+                # Display name: what the user sees (may not be unique)
+                display_name = entry.title
+                # Canonical name: set by Shelly integration, stable even after renames
+                canonical_name = entry.title
+                device_identifiers = {(DOMAIN, entry.entry_id)}
                 device_id = None
+
                 for dev in device_reg.devices.values():
                     if entry.entry_id in dev.config_entries:
-                        name = dev.name_by_user or dev.name or entry.title
+                        display_name = dev.name_by_user or dev.name or entry.title
+                        canonical_name = dev.name or entry.title
+                        device_identifiers = set(dev.identifiers) or device_identifiers
                         device_id = dev.id
                         break
 
-                if not name:
+                if not canonical_name:
                     continue
 
-                # Determine profile: prefer config entry data, then entity registry
+                # entity_id and unique_id based on canonical name (dev.name, not name_by_user)
+                # — identical format to original, but ignores user renames so slugs stay unique
+                prefix = "shelly" if gen >= 2 else "shelly_gen1"
+                slug = device_name_to_slug(canonical_name)
+                entity_id = f"sensor.{prefix}_{slug}_schedule"
+                unique_id = f"shelly_schedule_{prefix}_{slug}"
+                new_unique_ids[entity_id] = unique_id
+                new_gens[entity_id] = gen
+
+                # Profile detection
                 entry_profile = entry.data.get("profile", "")
                 if entry_profile == "cover":
                     profile = "cover"
                 elif entry_profile in ("switch", "rgb", "rgbw", "light"):
                     profile = "switch"
                 elif device_id:
-                    # Fallback: check entity registry for cover entities
                     profile = "switch"
                     for ent in er.async_entries_for_device(entity_reg, device_id):
                         if ent.entity_id.startswith("cover."):
@@ -245,26 +283,29 @@ class ShellyScheduleCoordinator:
                             break
                 else:
                     profile = "switch"
-                _LOGGER.debug("Device %s: profile=%s (entry_data=%s)", name, profile, entry_profile)
 
-                # Read credentials directly from Shelly config entry
-                password = entry.data.get("password", "")
-                username = entry.data.get("username", "admin")
-                new_creds[name] = (username, password)
+                _LOGGER.debug(
+                    "Device %r canonical=%r entity_id=%s profile=%s",
+                    display_name, canonical_name, entity_id, profile,
+                )
+
+                new_creds[entity_id] = (entry.data.get("username", "admin"), entry.data.get("password", ""))
+                new_names[entity_id] = display_name
+                new_entity_by_name[display_name] = entity_id
+                new_identifiers[entity_id] = device_identifiers
 
                 if gen >= 2:
-                    new_gen2[name] = host
-                    self._device_profiles[name] = profile
+                    new_gen2[entity_id] = host
+                    new_profiles[entity_id] = profile
                 else:
-                    new_gen1[name] = host
+                    new_gen1[entity_id] = host
 
             self._shelly_creds = new_creds
+            self._device_profiles = new_profiles
+            self._display_names = new_names
+            self._entity_by_name = new_entity_by_name
 
-            gen2_names = sorted(new_gen2.keys())
-            gen1_names = sorted(new_gen1.keys())
-            _LOGGER.info(
-                "Shelly found – Gen2/Gen3: %s, Gen1: %s", gen2_names, gen1_names
-            )
+            _LOGGER.info("Shelly found – Gen2/Gen3: %d, Gen1: %d", len(new_gen2), len(new_gen1))
 
             if new_gen2:
                 self.device_map = new_gen2
@@ -279,69 +320,76 @@ class ShellyScheduleCoordinator:
             # Create sensor entities for newly discovered devices
             from .sensor import ShellyScheduleSensor
             new_entities = []
-            for name, host in new_gen2.items():
-                if name not in self._sensors:
-                    identifiers = _find_device_identifiers(self.hass, device_reg, name) or {(DOMAIN, name)}
-                    sensor = ShellyScheduleSensor(self, name, host, 2, identifiers)
-                    self._sensors[name] = sensor
+            for eid, host in {**new_gen2, **new_gen1}.items():
+                gen = new_gens.get(eid, 2 if eid in new_gen2 else 1)
+                if eid in self._sensors:
+                    # Update mutable fields on existing sensor (gen may have changed)
+                    self._sensors[eid]._gen = gen
+                    self._sensors[eid]._device_name = new_names[eid]
+                    self._sensors[eid]._hostname = host
+                else:
+                    sensor = ShellyScheduleSensor(
+                        coordinator=self,
+                        device_name=new_names[eid],
+                        hostname=host,
+                        gen=gen,
+                        device_identifiers=new_identifiers.get(eid, {(DOMAIN, eid)}),
+                        sensor_entity_id=eid,
+                        sensor_unique_id=new_unique_ids[eid],
+                    )
+                    self._sensors[eid] = sensor
                     new_entities.append(sensor)
-            for name, host in new_gen1.items():
-                if name not in self._sensors:
-                    identifiers = _find_device_identifiers(self.hass, device_reg, name) or {(DOMAIN, f"gen1_{name}")}
-                    sensor = ShellyScheduleSensor(self, name, host, 1, identifiers)
-                    self._sensors[name] = sensor
-                    new_entities.append(sensor)
+
             if new_entities and self.async_add_sensor_entities is not None:
                 self.async_add_sensor_entities(new_entities, True)
 
-            # Update select entity options
+            gen2_names = sorted(new_names[e] for e in new_gen2)
+            gen1_names = sorted(new_names[e] for e in new_gen1)
             if self.device_select is not None:
                 self.device_select.update_options(gen2_names)
             if self.gen1_device_select is not None:
                 self.gen1_device_select.update_options(gen1_names)
 
         except Exception as exc:
-            _LOGGER.error("load_devices error: %s", exc)
+            _LOGGER.exception("load_devices error: %s", exc)
+
+    async def update_sensor(self, eid: str) -> None:
+        """Update a single sensor by entity_id (fast, targeted refresh)."""
+        sensor = self._sensors.get(eid)
+        if eid in self.device_map:
+            hostname = self.device_map[eid]
+            _, password = self._get_credentials(eid, 2)
+            data = await self.hass.async_add_executor_job(
+                _http_get_sync, hostname, "Schedule.List", password
+            )
+            if data is not None:
+                if sensor:
+                    sensor.set_gen2_data(data.get("jobs", []), password, self._device_profiles.get(eid, "switch"))
+            else:
+                if sensor:
+                    sensor.set_unavailable()
+        elif eid in self.gen1_device_map:
+            hostname = self.gen1_device_map[eid]
+            user, password = self._get_credentials(eid, 1)
+            data = await self.hass.async_add_executor_job(
+                _gen1_http_get_sync, hostname, "settings/relay/0", user, password
+            )
+            if data is not None:
+                if sensor:
+                    sensor.set_gen1_data(data.get("schedule_rules", []), data.get("schedule", False))
+            else:
+                if sensor:
+                    sensor.set_unavailable()
 
     async def update_sensors(self) -> None:
         """Update all Shelly schedule sensors via HTTP."""
         if not self.device_map and not self.gen1_device_map:
             await self.load_devices()
 
-        _LOGGER.info("Updating %d Gen2/Gen3 devices...", len(self.device_map))
+        _LOGGER.info("Updating %d Gen2/Gen3 + %d Gen1 devices...", len(self.device_map), len(self.gen1_device_map))
 
-        # Gen2/Gen3 devices
-        for name, hostname in self.device_map.items():
-            sensor = self._sensors.get(name)
-            _, password = self._get_credentials(name, 2)
-            data = await self.hass.async_add_executor_job(
-                _http_get_sync, hostname, "Schedule.List", password
-            )
-            if data is not None:
-                jobs = data.get("jobs", [])
-                profile = self._device_profiles.get(name, "switch")
-                if sensor:
-                    sensor.set_gen2_data(jobs, password, profile)
-                _LOGGER.info("OK: %s = %d schedules", name, len(jobs))
-            else:
-                if sensor:
-                    sensor.set_unavailable()
-                _LOGGER.warning("Unreachable: %s", hostname)
-
-        # Gen1 devices
-        for name, hostname in self.gen1_device_map.items():
-            sensor = self._sensors.get(name)
-            user, password = self._get_credentials(name, 1)
-            data = await self.hass.async_add_executor_job(
-                _gen1_http_get_sync, hostname, "settings/relay/0", user, password
-            )
-            if data is not None:
-                rules = data.get("schedule_rules", [])
-                if sensor:
-                    sensor.set_gen1_data(rules, data.get("schedule", False))
-            else:
-                if sensor:
-                    sensor.set_unavailable()
+        for eid in list(self.device_map) + list(self.gen1_device_map):
+            await self.update_sensor(eid)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -349,49 +397,73 @@ class ShellyScheduleCoordinator:
 def _resolve_device(
     coord: "ShellyScheduleCoordinator", call: ServiceCall
 ) -> tuple[str | None, str | None]:
-    """Return (device_name, hostname) from call.data or entity fallback.
+    """Return (entity_id, hostname) from call.data.
 
-    If call.data contains 'device', it is matched case-insensitively against
-    device_map keys.  No silent fallback to a different device occurs when an
-    explicit device name is supplied but not found.
+    Accepts:
+      - entity_id  (preferred): the sensor entity_id, e.g. "sensor.shelly_schedule_aabbcc..."
+      - device     (legacy):    display name, resolved via _entity_by_name reverse lookup
+    Falls back to the currently selected device in the helper select entity.
     """
-    requested = call.data.get("device")
+    # Prefer new entity_id param; fall back to old 'device' display-name param
+    requested = call.data.get("entity_id") or call.data.get("device")
     if requested:
-        # Exact match first
+        # Direct entity_id hit
         hostname = coord.device_map.get(requested)
         if hostname:
             return requested, hostname
-        # Case-insensitive fallback
-        lower = requested.lower()
-        for key, host in coord.device_map.items():
-            if key.lower() == lower:
-                _LOGGER.debug("Device name matched case-insensitively: %r → %r", requested, key)
-                return key, host
+        # Legacy: display_name → entity_id
+        eid = coord._entity_by_name.get(requested)
+        if eid:
+            hostname = coord.device_map.get(eid)
+            if hostname:
+                _LOGGER.debug("resolve_device: mapped display name %r → %s", requested, eid)
+                return eid, hostname
         _LOGGER.error(
-            "resolve_device: '%s' not in device_map %s", requested, list(coord.device_map.keys())
+            "resolve_device: '%s' not found in device_map or name lookup", requested
         )
         return None, None
-    # No device in call.data → use selected entity
+
+    # Fallback: legacy helper select entity
     name = coord.device_select._attr_current_option if coord.device_select else None
     if not name or name == "–":
         _LOGGER.error("resolve_device: no device selected")
         return None, None
-    return name, coord.device_map.get(name)
+    eid = coord._entity_by_name.get(name, name)
+    return eid, coord.device_map.get(eid)
 
 
 def _resolve_gen1_device(
     coord: "ShellyScheduleCoordinator",
+    call: "ServiceCall | None" = None,
 ) -> tuple[str | None, str | None, str | None]:
-    """Return (device_name, hostname, error_msg) for the selected Gen1 device."""
+    """Return (entity_id, hostname, error_msg) for a Gen1 device.
+
+    Accepts entity_id or legacy display name via call.data, or falls back to
+    the currently selected device in the helper select entity.
+    """
+    if call is not None:
+        requested = call.data.get("entity_id") or call.data.get("device")
+        if requested:
+            hostname = coord.gen1_device_map.get(requested)
+            if hostname:
+                return requested, hostname, None
+            eid = coord._entity_by_name.get(requested)
+            if eid:
+                hostname = coord.gen1_device_map.get(eid)
+                if hostname:
+                    return eid, hostname, None
+            return None, None, f"Gen1 device not found: {requested!r}"
+
     if coord.gen1_device_select is None:
         return None, None, "gen1_device_select not initialised"
     name = coord.gen1_device_select._attr_current_option
     if not name or name == "–":
         return None, None, "No Gen1 device selected"
-    hostname = coord.gen1_device_map.get(name)
+    eid = coord._entity_by_name.get(name, name)
+    hostname = coord.gen1_device_map.get(eid)
     if not hostname:
         return None, None, f"Gen1 device unknown: {name}"
-    return name, hostname, None
+    return eid, hostname, None
 
 
 # ── Service handler implementations ──────────────────────────────────────────
@@ -452,7 +524,7 @@ async def _svc_create_schedule(coord: ShellyScheduleCoordinator, call: ServiceCa
     )
     if result:
         _LOGGER.info("Schedule created on %s: ID=%s, timespec=%s", geraet_name, result.get("id"), timespec)
-        await coord.update_sensors()
+        await coord.update_sensor(geraet_name)
     else:
         _LOGGER.error("Schedule creation failed on %s", geraet_name)
 
@@ -500,7 +572,7 @@ async def _svc_delete_schedule(coord: ShellyScheduleCoordinator, call: ServiceCa
     )
     if result is not None:
         _LOGGER.info("Schedule %d deleted on %s", schedule_id, geraet_name)
-        await coord.update_sensors()
+        await coord.update_sensor(geraet_name)
 
 
 async def _svc_set_schedule_enabled(
@@ -516,7 +588,7 @@ async def _svc_set_schedule_enabled(
         _http_post_sync, hostname, "Schedule.Update", json.dumps({"id": schedule_id, "enable": enable}), password,
     )
     if result is not None:
-        await coord.update_sensors()
+        await coord.update_sensor(geraet_name)
 
 
 async def _svc_enable_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
@@ -537,7 +609,7 @@ async def _svc_replace_schedule(coord: ShellyScheduleCoordinator, call: ServiceC
 
 async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: set a schedule rule on the selected Gen1 device (replaces all rules)."""
-    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    eid, hostname, err = _resolve_gen1_device(coord)
     if err:
         _LOGGER.error(err)
         return
@@ -552,7 +624,7 @@ async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: Service
     action = "on" if (coord.gen1_switch is not None and coord.gen1_switch._attr_is_on) else "off"
     regel = f"{stunde:02d}{minute:02d}-0123456-{action}"
 
-    user, password = coord._get_credentials(geraet_name, 1)
+    user, password = coord._get_credentials(eid, 1)
     result = await coord.hass.async_add_executor_job(
         _gen1_http_post_form_sync,
         hostname,
@@ -562,47 +634,47 @@ async def _svc_gen1_set_schedule(coord: ShellyScheduleCoordinator, call: Service
         password,
     )
     if result is not None:
-        _LOGGER.info("Gen1 schedule set on %s: %s", geraet_name, regel)
-        await coord.update_sensors()
+        _LOGGER.info("Gen1 schedule set on %s: %s", eid, regel)
+        await coord.update_sensor(eid)
 
 
 async def _svc_gen1_delete_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: delete all schedule rules from the selected Gen1 device."""
-    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    eid, hostname, err = _resolve_gen1_device(coord)
     if err:
         return
-    user, password = coord._get_credentials(geraet_name, 1)
+    user, password = coord._get_credentials(eid, 1)
     result = await coord.hass.async_add_executor_job(
         _gen1_http_get_sync, hostname, "settings/relay/0?schedule=false", user, password
     )
     if result is not None:
-        await coord.update_sensors()
+        await coord.update_sensor(eid)
 
 
 async def _svc_gen1_enable_scheduling(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: enable scheduling on the selected Gen1 device."""
-    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    eid, hostname, err = _resolve_gen1_device(coord, call)
     if err:
         return
-    user, password = coord._get_credentials(geraet_name, 1)
+    user, password = coord._get_credentials(eid, 1)
     result = await coord.hass.async_add_executor_job(
         _gen1_http_get_sync, hostname, "settings/relay/0?schedule=true", user, password
     )
     if result is not None:
-        await coord.update_sensors()
+        await coord.update_sensor(eid)
 
 
 async def _svc_gen1_disable_scheduling(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: disable scheduling on the selected Gen1 device."""
-    geraet_name, hostname, err = _resolve_gen1_device(coord)
+    eid, hostname, err = _resolve_gen1_device(coord, call)
     if err:
         return
-    user, password = coord._get_credentials(geraet_name, 1)
+    user, password = coord._get_credentials(eid, 1)
     result = await coord.hass.async_add_executor_job(
         _gen1_http_get_sync, hostname, "settings/relay/0?schedule=false", user, password
     )
     if result is not None:
-        await coord.update_sensors()
+        await coord.update_sensor(eid)
 
 
 async def _svc_gen1_save_rules(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
@@ -610,23 +682,17 @@ async def _svc_gen1_save_rules(coord: ShellyScheduleCoordinator, call: ServiceCa
 
     Parameters
     ----------
-    device : str   – device name as shown in HA (e.g. "Shelly Plug S")
-    rules  : list  – list of rule strings like "30 7 * * 1,2,3,4,5=on"
-                     (empty list → disable scheduling and clear all rules)
+    entity_id : str  – sensor entity_id (preferred, e.g. "sensor.shelly_schedule_aabbcc...")
+    device    : str  – legacy display name fallback
+    rules     : list – rule strings; empty list → disable scheduling
     """
-    device_name = call.data.get("device")
+    eid, hostname, err = _resolve_gen1_device(coord, call)
+    if err or not hostname:
+        _LOGGER.error("gen1_save_rules: %s", err or "device not found")
+        return
+
     rules: list[str] = list(call.data.get("rules", []))
-
-    if not device_name:
-        _LOGGER.error("gen1_save_rules: missing 'device' parameter")
-        return
-
-    hostname = coord.gen1_device_map.get(device_name)
-    if not hostname:
-        _LOGGER.error("gen1_save_rules: unknown Gen1 device '%s'", device_name)
-        return
-
-    user, password = coord._get_credentials(device_name, 1)
+    user, password = coord._get_credentials(eid, 1)
 
     if not rules:
         await coord.hass.async_add_executor_job(
@@ -645,7 +711,7 @@ async def _svc_gen1_save_rules(coord: ShellyScheduleCoordinator, call: ServiceCa
         await coord.hass.async_add_executor_job(
             _gen1_http_post_raw_sync, hostname, "settings/relay/0", body, user, password
         )
-    await coord.update_sensors()
+    await coord.update_sensor(eid)
 
 
 # ── Integration setup ─────────────────────────────────────────────────────────

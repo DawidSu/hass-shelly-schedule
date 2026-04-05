@@ -5,7 +5,7 @@
   "no_entity":           "Please select an entity under <b>Edit</b>.",
   "entity_not_found":    "Entity {0} not found.",
   "section_gen1":        "Gen1 Devices",
-  "section_gen2":        "Gen2/Gen3 Devices",
+  "section_gen2":        "Gen2/Gen3/Gen4 Devices",
   "webui_btn":           "Web-UI",
   "webui_title":         "Open Web-UI",
   "unavailable":         "Unreachable",

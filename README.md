@@ -4,7 +4,7 @@ Home Assistant Custom Integration zum Konfigurieren von Aufgaben (Zeitplänen) d
 
 Wenn dir die Integration gefällt, freue ich mich über eine Spende: [![PayPal](https://img.shields.io/badge/PayPal-Spende-blue?logo=paypal)](https://www.paypal.com/paypalme/dawidSuchy)
 
-Unterstützt **Gen2/Gen3** (Digest-Auth, RPC-API) und **Gen1** (Basic-Auth) Geräte.
+Unterstützt **Gen2/Gen3/Gen4** (Digest-Auth, RPC-API) und **Gen1** (Basic-Auth) Geräte.
 
 ## Zweck
 
@@ -20,6 +20,8 @@ Shelly-Geräte bieten eine eingebaute Zeitplanfunktion, mit der Aktionen (Ein/Au
 - Wochentag-Auswahl per Checkboxen (Mo Di Mi Do Fr Sa So)
 - Aktionsauswahl gefiltert nach Geräteprofil (Ein/Aus für Switches, Öffnen/Schließen/Stoppen/Position für Cover)
 - Web-UI-Link mit automatischem Passwort in die Zwischenablage
+- Gen1/Gen2/Gen3/Gen4-Badge neben dem Gerätenamen
+- Aufgabenliste aktualisiert sich automatisch nach Erstellen/Bearbeiten/Löschen
 - Zwei native Lovelace-Karten — keine Drittanbieter-Karten nötig:
   - `shelly-schedule-card` — Entität per Editor konfiguriert
   - `shelly-schedule-card-inline` — Entitätsauswahl direkt in der Karte
@@ -62,7 +64,7 @@ Shelly-Geräte bieten eine eingebaute Zeitplanfunktion, mit der Aktionen (Ein/Au
 Die Integration benötigt **keine manuelle Konfiguration** in `configuration.yaml`. Zugangsdaten und Geräteliste werden automatisch aus der bestehenden Shelly-Integration ausgelesen.
 
 Nach dem Neustart:
-- Alle Shelly Gen2/Gen3 und Gen1 Geräte werden automatisch erkannt
+- Alle Shelly Gen2/Gen3/Gen4 und Gen1 Geräte werden automatisch erkannt
 - Für jedes Gerät wird ein Sensor `sensor.shelly_<name>_schedule` erstellt und dem jeweiligen Shelly-Gerät in der HA Device Registry zugeordnet
 - Das Geräteprofil (Switch/Cover) wird automatisch ermittelt
 
@@ -137,23 +139,23 @@ storage_key: karte-wohnzimmer
 |---------|-----------|-------------|
 | `shelly_schedule.reload_devices` | — | Geräteliste neu laden |
 | `shelly_schedule.update_sensors` | — | Alle Sensoren aktualisieren |
-| `shelly_schedule.create_schedule` | `device`, `timespec`, `enable`, `calls` | Aufgabe erstellen (Gen2/Gen3) |
-| `shelly_schedule.delete_schedule` | `device`, `schedule_id` | Aufgabe löschen (Gen2/Gen3) |
-| `shelly_schedule.enable_schedule` | `device`, `schedule_id` | Aufgabe aktivieren (Gen2/Gen3) |
-| `shelly_schedule.disable_schedule` | `device`, `schedule_id` | Aufgabe deaktivieren (Gen2/Gen3) |
-| `shelly_schedule.replace_schedule` | `device`, `schedule_id`, `timespec`, `enable`, `calls` | Aufgabe ersetzen (Gen2/Gen3) |
-| `shelly_schedule.gen1_set_schedule` | — | Aufgabe setzen (Gen1) |
-| `shelly_schedule.gen1_delete_schedule` | — | Aufgabe löschen (Gen1) |
-| `shelly_schedule.gen1_enable_scheduling` | — | Zeitplanung aktivieren (Gen1) |
-| `shelly_schedule.gen1_disable_scheduling` | — | Zeitplanung deaktivieren (Gen1) |
+| `shelly_schedule.create_schedule` | `entity_id`, `timespec`, `enable`, `calls` | Aufgabe erstellen (Gen2/Gen3/Gen4) |
+| `shelly_schedule.delete_schedule` | `entity_id`, `schedule_id` | Aufgabe löschen (Gen2/Gen3/Gen4) |
+| `shelly_schedule.enable_schedule` | `entity_id`, `schedule_id` | Aufgabe aktivieren (Gen2/Gen3/Gen4) |
+| `shelly_schedule.disable_schedule` | `entity_id`, `schedule_id` | Aufgabe deaktivieren (Gen2/Gen3/Gen4) |
+| `shelly_schedule.replace_schedule` | `entity_id`, `schedule_id`, `timespec`, `enable`, `calls` | Aufgabe ersetzen (Gen2/Gen3/Gen4) |
+| `shelly_schedule.gen1_save_rules` | `entity_id`, `rules` | Alle Zeitplanregeln ersetzen (Gen1) |
+| `shelly_schedule.gen1_enable_scheduling` | `entity_id` | Zeitplanung aktivieren (Gen1) |
+| `shelly_schedule.gen1_disable_scheduling` | `entity_id` | Zeitplanung deaktivieren (Gen1) |
 
 ### Service-Parameter
 
-- **`device`**: Gerätename aus der HA Device Registry (z.B. `Rollladen Wohnzimmer`)
+- **`entity_id`**: Sensor-Entität des Geräts (z.B. `sensor.shelly_wohnzimmer_licht_schedule`)
 - **`schedule_id`**: ID der Aufgabe (integer, von Shelly vergeben)
 - **`timespec`**: Cron-Format `"0 <min> <stunde> * * <tage>"` (z.B. `"0 30 7 * * MON,TUE,WED,THU,FRI"`) oder Sonnenformat (z.B. `"@sunset-0h30m * * MON,TUE,WED,THU,FRI"`)
 - **`enable`**: `true` / `false`
 - **`calls`**: Liste von RPC-Aufrufen, z.B. `[{"method": "Switch.Set", "params": {"id": 0, "on": true}}]`
+- **`rules`**: Liste von Gen1-Regelstrings, z.B. `["0800-01234-on", "2200-01234-off"]` (leere Liste → Zeitplanung deaktivieren)
 
 ## Sensor-Attribute
 
@@ -161,10 +163,11 @@ Jeder `sensor.shelly_*_schedule` enthält folgende Attribute:
 
 | Attribut | Beschreibung |
 |----------|-------------|
-| `jobs` | Liste der aktuellen Aufgaben (Gen2/Gen3) |
+| `jobs` | Liste der aktuellen Aufgaben (Gen2/Gen3/Gen4) |
 | `schedule_rules` | Liste der Zeitplanregeln (Gen1) |
 | `hostname` | IP-Adresse des Geräts |
-| `device_name` | Gerätename (exakter Key für Service-Aufrufe) |
-| `device_profile` | `switch` oder `cover` |
+| `device_name` | Angezeigter Gerätename |
+| `gen` | Gerätegeneration (`1`, `2`, `3` oder `4`) |
+| `device_profile` | `switch` oder `cover` (Gen2/Gen3/Gen4) |
 | `login_user` | Web-UI Benutzername |
 | `login_password` | Web-UI Passwort |

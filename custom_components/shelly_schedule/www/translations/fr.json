@@ -5,7 +5,7 @@
   "no_entity":           "Veuillez sélectionner une entité sous <b>Modifier</b>.",
   "entity_not_found":    "Entité {0} introuvable.",
   "section_gen1":        "Appareils Gen1",
-  "section_gen2":        "Appareils Gen2/Gen3",
+  "section_gen2":        "Appareils Gen2/Gen3/Gen4",
   "webui_btn":           "Web-UI",
   "webui_title":         "Ouvrir Web-UI",
   "unavailable":         "Inaccessible",

@@ -36,7 +36,7 @@ const TRANSLATIONS = {
     no_entity:           "Bitte eine Entität unter <b>Bearbeiten</b> auswählen.",
     entity_not_found:    "Entität {0} nicht gefunden.",
     section_gen1:        "Gen1 Geräte",
-    section_gen2:        "Gen2/Gen3 Geräte",
+    section_gen2:        "Gen2/Gen3/Gen4 Geräte",
     webui_btn:           "Web-UI",
     webui_title:         "Web-UI öffnen",
     unavailable:         "Nicht erreichbar",
@@ -110,7 +110,7 @@ const TRANSLATIONS = {
     no_entity:           "Please select an entity under <b>Edit</b>.",
     entity_not_found:    "Entity {0} not found.",
     section_gen1:        "Gen1 Devices",
-    section_gen2:        "Gen2/Gen3 Devices",
+    section_gen2:        "Gen2/Gen3/Gen4 Devices",
     webui_btn:           "Web-UI",
     webui_title:         "Open Web-UI",
     unavailable:         "Unreachable",
@@ -823,10 +823,9 @@ class ShellyScheduleCard extends HTMLElement {
       // Test action (Gen2 only)
       const testBtn = e.target.closest(".btn-test");
       if (testBtn) {
-        const deviceName = this._entityToDeviceName(testBtn.dataset.entity);
         try {
           const calls = JSON.parse(testBtn.dataset.calls.replace(/&#39;/g, "'"));
-          this._callService("run_action", { device: deviceName, calls });
+          this._callService("run_action", { entity_id: testBtn.dataset.entity, calls });
         } catch (err) { console.error("parse calls", err); }
         return;
       }
@@ -836,7 +835,7 @@ class ShellyScheduleCard extends HTMLElement {
       if (editBtn) {
         const entityId = editBtn.dataset.entity;
         const state = this._hass?.states[entityId];
-        const name = state?.attributes?.friendly_name?.replace(" Schedule", "") || entityId;
+        const name = state?.attributes?.device_name || entityId;
         try {
           const job = JSON.parse(editBtn.dataset.job.replace(/&#39;/g, "'"));
           this._openModal(job, { entityId, name, state });
@@ -848,18 +847,17 @@ class ShellyScheduleCard extends HTMLElement {
       const delBtn = e.target.closest(".btn-delete");
       if (delBtn) {
         const entityId = delBtn.dataset.entity;
-        const deviceName = this._entityToDeviceName(entityId);
         if (delBtn.dataset.gen1 === "true") {
           const idx = parseInt(delBtn.dataset.id);
           if (confirm(this._t("confirm_delete", idx + 1))) {
             const rules = [...(this._hass?.states[entityId]?.attributes?.schedule_rules || [])];
             rules.splice(idx, 1);
-            this._callService("gen1_save_rules", { device: deviceName, rules });
+            this._callService("gen1_save_rules", { entity_id: entityId, rules });
           }
         } else {
           const id = parseInt(delBtn.dataset.id);
           if (confirm(this._t("confirm_delete", id))) {
-            this._callService("delete_schedule", { device: deviceName, schedule_id: id });
+            this._callService("delete_schedule", { entity_id: entityId, schedule_id: id });
           }
         }
         return;
@@ -871,18 +869,11 @@ class ShellyScheduleCard extends HTMLElement {
       const input = e.target.closest(".btn-toggle");
       if (!input) return;
       const entityId = input.dataset.entity;
-      const deviceName = this._entityToDeviceName(entityId);
       if (input.dataset.gen1 === "true") {
-        // Gen1: toggle controls global scheduling for the device
-        this._callService(input.checked ? "gen1_enable_scheduling" : "gen1_disable_scheduling", {});
-        this._hass?.callService("input_select", "select_option", {
-          entity_id: "input_select.shelly_gen1_geraet",
-          option: deviceName,
-        }).catch(() => {});
+        this._callService(input.checked ? "gen1_enable_scheduling" : "gen1_disable_scheduling", { entity_id: entityId });
       } else {
-        // Gen2: toggle controls individual schedule
         this._callService(input.checked ? "enable_schedule" : "disable_schedule", {
-          device: deviceName,
+          entity_id: entityId,
           schedule_id: parseInt(input.dataset.id),
         });
       }
@@ -1061,7 +1052,7 @@ class ShellyScheduleCard extends HTMLElement {
       const timeVal   = backdrop.querySelector("#m-time").value;
       const checked   = [...backdrop.querySelectorAll(".m-day-cb:checked")].map(cb => cb.dataset.cron);
       const actionVal = backdrop.querySelector("#m-action").value;
-      const deviceName = this._entityToDeviceName(dev.entityId);
+      const entityId  = dev.entityId;  // entity_id is the unique device key
 
       if (isGen1) {
         // ── Gen1 save ──────────────────────────────────────────────────────
@@ -1081,9 +1072,9 @@ class ShellyScheduleCard extends HTMLElement {
           const [h, m] = (timeVal || "07:00").split(":").map(Number);
           newRule = buildGen1Rule(h, m, dow, act);
         }
-        const allRules = [...(this._hass?.states[dev.entityId]?.attributes?.schedule_rules || [])];
+        const allRules = [...(this._hass?.states[entityId]?.attributes?.schedule_rules || [])];
         if (isEdit) { allRules[gen1Idx] = newRule; } else { allRules.push(newRule); }
-        this._callService("gen1_save_rules", { device: deviceName, rules: allRules });
+        this._callService("gen1_save_rules", { entity_id: entityId, rules: allRules });
       } else {
         // ── Gen2 save ──────────────────────────────────────────────────────
         const typeVal    = backdrop.querySelector("#m-timetype").value;
@@ -1110,7 +1101,7 @@ class ShellyScheduleCard extends HTMLElement {
         else if (actionVal === "Stoppen") calls = [{ method: "Cover.Stop", params: { id: 0 } }];
         else calls = [{ method: "Cover.GoToPosition", params: { id: 0, pos: posVal } }];
 
-        const data = { device: deviceName, timespec, enable: enabledVal, calls };
+        const data = { entity_id: entityId, timespec, enable: enabledVal, calls };
         if (isEdit) data.schedule_id = job.id;
         this._callService(isEdit ? "replace_schedule" : "create_schedule", data);
       }
@@ -1176,9 +1167,9 @@ class ShellyScheduleCard extends HTMLElement {
   _callService(service, data = {}) {
     if (!this._hass) return;
     this._hass.callService("shelly_schedule", service, data).then(() => {
-      // WebSocket state-change events arrive after the service promise resolves.
-      // Schedule a refresh so the UI reflects the new state without waiting for the next hass cycle.
-      setTimeout(() => this._updateContent(), 800);
+      // The backend updates the sensor before the service resolves.
+      // A short delay lets the WebSocket state-change event arrive before we re-render.
+      setTimeout(() => this._updateContent(), 200);
     }).catch(err => {
       console.error("shelly_schedule." + service, err);
     });
