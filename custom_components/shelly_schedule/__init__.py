@@ -260,12 +260,12 @@ class ShellyScheduleCoordinator:
                 if not canonical_name:
                     continue
 
-                # entity_id and unique_id based on canonical name (dev.name, not name_by_user)
-                # — identical format to original, but ignores user renames so slugs stay unique
+                # entity_id and unique_id based on display_name (same as old code)
+                # — preserves existing entity_ids across HA restarts
                 prefix = "shelly" if gen >= 2 else "shelly_gen1"
-                slug = device_name_to_slug(canonical_name)
+                slug = device_name_to_slug(display_name)
                 entity_id = f"sensor.{prefix}_{slug}_schedule"
-                unique_id = f"shelly_schedule_{prefix}_{slug}"
+                unique_id = f"shelly_schedule_{prefix}_{slug}"  # slug = from display_name
                 new_unique_ids[entity_id] = unique_id
                 new_gens[entity_id] = gen
 
@@ -476,6 +476,23 @@ async def _svc_reload_devices(coord: ShellyScheduleCoordinator, call: ServiceCal
 async def _svc_update_sensors(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
     """Service: refresh all schedule sensors."""
     await coord.update_sensors()
+
+
+async def _svc_cleanup_orphaned_sensors(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
+    """Service: remove orphaned shelly_schedule sensor entities from the entity registry."""
+    from homeassistant.helpers import entity_registry as er
+    entity_reg = er.async_get(coord.hass)
+    active_entity_ids = set(coord._sensors.keys())
+    removed = []
+    for entry in list(entity_reg.entities.values()):
+        if (
+            entry.unique_id.startswith("shelly_schedule_")
+            and entry.entity_id not in active_entity_ids
+        ):
+            entity_reg.async_remove(entry.entity_id)
+            removed.append(entry.entity_id)
+            _LOGGER.info("cleanup_orphaned_sensors: removed %s", entry.entity_id)
+    _LOGGER.info("cleanup_orphaned_sensors: removed %d orphaned sensor(s): %s", len(removed), removed)
 
 
 async def _svc_create_schedule(coord: ShellyScheduleCoordinator, call: ServiceCall) -> None:
@@ -825,6 +842,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.services.async_register(DOMAIN, "gen1_disable_scheduling", partial(_svc_gen1_disable_scheduling, coord))
     hass.services.async_register(DOMAIN, "run_action",             partial(_svc_run_action,             coord))
     hass.services.async_register(DOMAIN, "gen1_save_rules",       partial(_svc_gen1_save_rules,        coord))
+    hass.services.async_register(DOMAIN, "cleanup_orphaned_sensors", partial(_svc_cleanup_orphaned_sensors, coord))
 
     # Delayed startup: wait for Shelly integration to finish loading
     async def _startup(delay: int = 20):

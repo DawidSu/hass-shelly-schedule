@@ -43,6 +43,8 @@ class ShellyScheduleSensor(SensorEntity):
         hostname: str,
         gen: int,
         device_identifiers: set | frozenset,
+        sensor_entity_id: str | None = None,
+        sensor_unique_id: str | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._device_name = device_name
@@ -51,9 +53,9 @@ class ShellyScheduleSensor(SensorEntity):
 
         clean = device_name_to_slug(device_name)
         prefix = "shelly" if gen >= 2 else "shelly_gen1"
-        self._attr_unique_id = f"shelly_schedule_{prefix}_{clean}"
+        self._attr_unique_id = sensor_unique_id or f"shelly_schedule_{prefix}_{clean}"
         # Preserve existing entity IDs so dashboards keep working
-        self.entity_id = f"sensor.{prefix}_{clean}_schedule"
+        self.entity_id = sensor_entity_id or f"sensor.{prefix}_{clean}_schedule"
 
         self._attr_name = None
         # Link to the existing Shelly device so HA knows device name, area, etc.
