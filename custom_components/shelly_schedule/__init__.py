@@ -217,11 +217,13 @@ class ShellyScheduleCoordinator:
         so HA entity registry keeps entities stable across renames.
         """
         try:
+            from homeassistant.helpers import area_registry as ar
             from homeassistant.helpers import device_registry as dr
             from homeassistant.helpers import entity_registry as er
 
             device_reg = dr.async_get(self.hass)
             entity_reg = er.async_get(self.hass)
+            area_reg = ar.async_get(self.hass)
             entries = self.hass.config_entries.async_entries("shelly")
             _LOGGER.info("Shelly config entries found: %d", len(entries))
 
@@ -235,6 +237,7 @@ class ShellyScheduleCoordinator:
             new_identifiers: dict[str, set] = {}
             new_unique_ids: dict[str, str] = {}
             new_gens: dict[str, int] = {}
+            new_output_counts: dict[str, int] = {}
 
             for entry in entries:
                 host = entry.data.get("host", "")
@@ -261,11 +264,26 @@ class ShellyScheduleCoordinator:
                     continue
 
                 # entity_id and unique_id based on display_name (same as old code)
-                # — preserves existing entity_ids across HA restarts
+                # — preserves existing entity_ids across HA restarts.
+                # When two devices share a display name, append the area name
+                # as disambiguator; fall back to entry_id suffix if no area set.
+                area_name = None
+                if device_id:
+                    dev_entry = device_reg.async_get(device_id)
+                    if dev_entry and dev_entry.area_id:
+                        area = area_reg.async_get_area(dev_entry.area_id)
+                        if area:
+                            area_name = area.name
+
                 prefix = "shelly" if gen >= 2 else "shelly_gen1"
                 slug = device_name_to_slug(display_name)
                 entity_id = f"sensor.{prefix}_{slug}_schedule"
-                unique_id = f"shelly_schedule_{prefix}_{slug}"  # slug = from display_name
+                if entity_id in new_unique_ids:
+                    disambig = device_name_to_slug(area_name) if area_name else entry.entry_id[-8:]
+                    slug = f"{slug}_{disambig}"
+                    entity_id = f"sensor.{prefix}_{slug}_schedule"
+                    display_name = f"{display_name} ({area_name})" if area_name else display_name
+                unique_id = f"shelly_schedule_{prefix}_{slug}"
                 new_unique_ids[entity_id] = unique_id
                 new_gens[entity_id] = gen
 
@@ -284,14 +302,26 @@ class ShellyScheduleCoordinator:
                 else:
                     profile = "switch"
 
+                # Count controllable output channels (switch or cover entities)
+                output_count = 0
+                if device_id:
+                    domain = "cover." if profile == "cover" else "switch."
+                    for ent in er.async_entries_for_device(entity_reg, device_id):
+                        if ent.entity_id.startswith(domain):
+                            output_count += 1
+                output_count = max(output_count, 1)
+
                 _LOGGER.debug(
-                    "Device %r canonical=%r entity_id=%s profile=%s",
-                    display_name, canonical_name, entity_id, profile,
+                    "Device %r canonical=%r entity_id=%s profile=%s outputs=%d",
+                    display_name, canonical_name, entity_id, profile, output_count,
                 )
 
+                new_output_counts[entity_id] = output_count
                 new_creds[entity_id] = (entry.data.get("username", "admin"), entry.data.get("password", ""))
                 new_names[entity_id] = display_name
-                new_entity_by_name[display_name] = entity_id
+                # For name→entity_id lookup: keep first device if names clash.
+                if display_name not in new_entity_by_name:
+                    new_entity_by_name[display_name] = entity_id
                 new_identifiers[entity_id] = device_identifiers
 
                 if gen >= 2:
@@ -327,6 +357,7 @@ class ShellyScheduleCoordinator:
                     self._sensors[eid]._gen = gen
                     self._sensors[eid]._device_name = new_names[eid]
                     self._sensors[eid]._hostname = host
+                    self._sensors[eid]._output_count = new_output_counts.get(eid, 1)
                 else:
                     sensor = ShellyScheduleSensor(
                         coordinator=self,
@@ -336,6 +367,7 @@ class ShellyScheduleCoordinator:
                         device_identifiers=new_identifiers.get(eid, {(DOMAIN, eid)}),
                         sensor_entity_id=eid,
                         sensor_unique_id=new_unique_ids[eid],
+                        output_count=new_output_counts.get(eid, 1),
                     )
                     self._sensors[eid] = sensor
                     new_entities.append(sensor)

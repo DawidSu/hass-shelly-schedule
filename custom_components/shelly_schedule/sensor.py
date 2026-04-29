@@ -45,11 +45,13 @@ class ShellyScheduleSensor(SensorEntity):
         device_identifiers: set | frozenset,
         sensor_entity_id: str | None = None,
         sensor_unique_id: str | None = None,
+        output_count: int = 1,
     ) -> None:
         self._coordinator = coordinator
         self._device_name = device_name
         self._hostname = hostname
         self._gen = gen
+        self._output_count = output_count
 
         clean = device_name_to_slug(device_name)
         prefix = "shelly" if gen >= 2 else "shelly_gen1"
@@ -106,6 +108,7 @@ class ShellyScheduleSensor(SensorEntity):
             "hostname": self._hostname,
             "device_name": self._device_name,
             "gen": self._gen,
+            "output_count": self._output_count,
         }
         if self._gen >= 2:
             attrs.update({

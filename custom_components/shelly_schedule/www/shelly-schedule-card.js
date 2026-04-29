@@ -77,6 +77,7 @@ const TRANSLATIONS = {
     modal_offset:        "Versatz (Minuten, negativ = davor)",
     modal_days:          "Wochentage",
     modal_action:        "Aktion",
+    modal_output:        "Ausgang",
     modal_position:      "Position (%)",
     modal_enabled:       "Aktiviert",
     modal_cancel:        "Abbrechen",
@@ -148,6 +149,7 @@ const TRANSLATIONS = {
     modal_offset:        "Offset (minutes, negative = before)",
     modal_days:          "Weekdays",
     modal_action:        "Action",
+    modal_output:        "Output",
     modal_position:      "Position (%)",
     modal_enabled:       "Enabled",
     modal_cancel:        "Cancel",
@@ -888,7 +890,7 @@ class ShellyScheduleCard extends HTMLElement {
     const isEdit = job !== null && job !== undefined;
 
     // ── Parse initial field values ──────────────────────────────────────────
-    let timeType, time, sunOffset, days, checkedSet, action, enabled, pos, gen1Idx;
+    let timeType, time, sunOffset, days, checkedSet, action, enabled, pos, gen1Idx, outputId = 0;
 
     if (isGen1) {
       enabled = true;
@@ -929,6 +931,7 @@ class ShellyScheduleCard extends HTMLElement {
       action    = isEdit && job.calls?.length ? callPart(job.calls[0]).split(" ")[0] : null;
       enabled   = isEdit ? (job.enable !== false) : true;
       pos       = isEdit && job.calls?.[0]?.params?.pos != null ? job.calls[0].params.pos : 50;
+      outputId  = isEdit && job.calls?.[0]?.params?.id != null ? job.calls[0].params.id : 0;
 
       const ALL_CRON = new Set(DAY_ORDER);
       function daysToSet(daysVal) {
@@ -950,6 +953,9 @@ class ShellyScheduleCard extends HTMLElement {
     const profile2 = isGen1 ? "switch"
       : (this._hass?.states[dev.entityId]?.attributes?.device_profile || this._getDeviceProfileFromHass(dev.entityId));
     const isCover = !isGen1 && profile2 === "cover";
+    const outputCount = !isGen1
+      ? (this._hass?.states[dev.entityId]?.attributes?.output_count || 1)
+      : 1;
     const availableActions = isGen1
       ? ["Einschalten", "Ausschalten"]
       : (isCover ? ["Öffnen", "Schließen", "Stoppen", "Position"] : ["Einschalten", "Ausschalten"]);
@@ -1016,6 +1022,15 @@ class ShellyScheduleCard extends HTMLElement {
           <label style="${S.label}">${this._t("modal_action")}</label>
           <select id="m-action" style="${S.field}">${actionOpts}</select>
         </div>
+        ${!isGen1 && outputCount > 1 ? `
+        <div style="${S.row}">
+          <label style="${S.label}">${this._t("modal_output")}</label>
+          <select id="m-output" style="${S.field}">
+            ${Array.from({length: outputCount}, (_, i) =>
+              `<option value="${i}" ${i === outputId ? "selected" : ""}>${i + 1}</option>`
+            ).join("")}
+          </select>
+        </div>` : ""}
         ${!isGen1 ? `
         <div id="pos-row" style="${S.row}display:${action === "Position" ? "block" : "none"}">
           <label style="${S.label}">${this._t("modal_position")}</label>
@@ -1081,7 +1096,9 @@ class ShellyScheduleCard extends HTMLElement {
         const offsetVal  = parseInt(backdrop.querySelector("#m-offset").value) || 0;
         const daySpec    = (checked.length === 0 || checked.length === 7) ? "*" : checked.join(",");
         const posVal     = parseInt(backdrop.querySelector("#m-pos").value) || 50;
-        const enabledVal = backdrop.querySelector("#m-enabled").checked;
+        const enabledVal  = backdrop.querySelector("#m-enabled").checked;
+        const outputEl    = backdrop.querySelector("#m-output");
+        const outId       = outputEl ? parseInt(outputEl.value) : 0;
 
         let timespec;
         if (typeVal === "sunrise" || typeVal === "sunset") {
@@ -1094,12 +1111,12 @@ class ShellyScheduleCard extends HTMLElement {
         }
 
         let calls;
-        if (actionVal === "Einschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: true } }];
-        else if (actionVal === "Ausschalten") calls = [{ method: "Switch.Set", params: { id: 0, on: false } }];
-        else if (actionVal === "Öffnen") calls = [{ method: "Cover.Open", params: { id: 0 } }];
-        else if (actionVal === "Schließen") calls = [{ method: "Cover.Close", params: { id: 0 } }];
-        else if (actionVal === "Stoppen") calls = [{ method: "Cover.Stop", params: { id: 0 } }];
-        else calls = [{ method: "Cover.GoToPosition", params: { id: 0, pos: posVal } }];
+        if (actionVal === "Einschalten") calls = [{ method: "Switch.Set", params: { id: outId, on: true } }];
+        else if (actionVal === "Ausschalten") calls = [{ method: "Switch.Set", params: { id: outId, on: false } }];
+        else if (actionVal === "Öffnen") calls = [{ method: "Cover.Open", params: { id: outId } }];
+        else if (actionVal === "Schließen") calls = [{ method: "Cover.Close", params: { id: outId } }];
+        else if (actionVal === "Stoppen") calls = [{ method: "Cover.Stop", params: { id: outId } }];
+        else calls = [{ method: "Cover.GoToPosition", params: { id: outId, pos: posVal } }];
 
         const data = { entity_id: entityId, timespec, enable: enabledVal, calls };
         if (isEdit) data.schedule_id = job.id;

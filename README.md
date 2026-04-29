@@ -14,6 +14,8 @@ Shelly-Geräte bieten eine eingebaute Zeitplanfunktion, mit der Aktionen (Ein/Au
 
 - Automatische Geräteerkennung und Zugangsdaten aus der bestehenden Shelly-Integration
 - Automatische Profilerkennung (Switch / Cover) pro Gerät
+- **Mehrkanalunterstützung**: Bei Geräten mit mehreren Ausgängen (z.B. Shelly Plus Uni, Shelly 2PM) erscheint im Erstellen/Bearbeiten-Dialog ein Ausgang-Selector
+- **Duplikatnamen**: Zwei Geräte mit gleichem Namen (z.B. „Fenster" in Küche und Wohnzimmer) werden anhand des Raums automatisch unterschieden
 - Aufgaben anzeigen, erstellen, bearbeiten, aktivieren/deaktivieren und löschen
 - Toggle-Switch zum schnellen Aktivieren/Deaktivieren einzelner Aufgaben
 - Unterstützung für feste Uhrzeiten sowie Sonnenauf-/-untergang mit Offset
@@ -130,7 +132,7 @@ storage_key: karte-wohnzimmer
 - **Geräteheader** mit Anzahl der Aufgaben, **Web-UI**-Link (Passwort wird automatisch in die Zwischenablage kopiert) und **+ Neu**-Button
 - **Aufgabenliste** mit Uhrzeit bzw. Sonnenauf-/-untergang, Wochentagen, Aktion und Toggle-Switch zum Aktivieren/Deaktivieren
 - **Bearbeiten- und Löschen-Buttons** pro Aufgabe
-- **Erstellen/Bearbeiten-Dialog** mit Zeittyp (Uhrzeit / Sonnenaufgang / Sonnenuntergang), Offset, Wochentag-Checkboxen, Aktion und Aktiviert-Checkbox
+- **Erstellen/Bearbeiten-Dialog** mit Zeittyp (Uhrzeit / Sonnenaufgang / Sonnenuntergang), Offset, Wochentag-Checkboxen, Aktion, Ausgang-Selector (bei Mehrkanal-Geräten) und Aktiviert-Checkbox
 - Bei leerer Liste: **+ Neu**-Button direkt neben „Keine Zeitpläne"
 
 ## Verfügbare Services
@@ -169,5 +171,6 @@ Jeder `sensor.shelly_*_schedule` enthält folgende Attribute:
 | `device_name` | Angezeigter Gerätename |
 | `gen` | Gerätegeneration (`1`, `2`, `3` oder `4`) |
 | `device_profile` | `switch` oder `cover` (Gen2/Gen3/Gen4) |
+| `output_count` | Anzahl der steuerbaren Ausgänge (bei Mehrkanal-Geräten > 1) |
 | `login_user` | Web-UI Benutzername |
 | `login_password` | Web-UI Passwort |
